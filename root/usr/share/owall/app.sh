@@ -1,9 +1,11 @@
 #!/bin/sh
 
 CONFIG="owall"
-CORE_BIN="sing-box"
+CORE_BIN="xray"
 CONFIG_FILE="/var/etc/owall.json"
 PID_FILE="/var/run/owall.pid"
+
+export XRAY_LOCATION_ASSET="/usr/share/v2ray"
 
 has_nft() {
 	command -v nft >/dev/null 2>&1
@@ -42,11 +44,11 @@ run() {
 	generate_config
 
 	if ! command -v "$CORE_BIN" >/dev/null 2>&1; then
-		echo "ERROR: $CORE_BIN not found in PATH! Please install sing-box."
+		echo "ERROR: $CORE_BIN not found in PATH! Please install xray-core."
 		exit 1
 	fi
 
-	echo "Starting $CORE_BIN with $CONFIG_FILE..."
+	echo "Starting Xray-core ($CORE_BIN) with $CONFIG_FILE..."
 	exec "$CORE_BIN" run -c "$CONFIG_FILE"
 }
 
@@ -57,10 +59,8 @@ kill_all() {
 
 reload() {
 	generate_config
-	killall -HUP "$CORE_BIN" 2>/dev/null || {
-		kill_all
-		run &
-	}
+	kill_all
+	run &
 	start_firewall
 }
 

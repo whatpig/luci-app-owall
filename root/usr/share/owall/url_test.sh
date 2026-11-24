@@ -43,7 +43,7 @@ auto_select_best() {
 		uci -q commit owall
 		echo "Best node selected: $best_node ($min_latency ms)"
 		# Reload configuration if running
-		if pidof sing-box >/dev/null 2>&1; then
+		if pidof xray >/dev/null 2>&1; then
 			/usr/share/owall/app.sh reload
 		fi
 	fi
@@ -60,7 +60,7 @@ check_status() {
 	fi
 
 	local running=0
-	pidof sing-box >/dev/null 2>&1 && running=1
+	pidof xray >/dev/null 2>&1 && running=1
 
 	local google_ok=0
 	if [ "$running" -eq 1 ]; then

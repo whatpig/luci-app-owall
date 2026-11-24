@@ -3,6 +3,7 @@
 TPROXY_PORT=1081
 DNS_PORT=5335
 FWMARK=0x1
+XRAY_MARK=0xff
 ROUTETABLE=100
 
 start_nftables() {
@@ -37,13 +38,16 @@ start_nftables() {
 			chain prerouting {
 				type filter hook prerouting priority mangle - 150; policy accept;
 
-				# Direct DNS redirect
+				# Bypass Xray-core self-marked outbound traffic (sockopt.mark = 255)
+				meta mark $XRAY_MARK return
+
+				# Direct DNS redirect for LAN clients
 				meta l4proto { tcp, udp } th dport 53 redirect to :$DNS_PORT
 
-				# Direct bypass for private and LAN addresses
+				# Direct bypass for private, LAN, VPS node, and China IP addresses
 				ip daddr @owall_direct return
 
-				# TPROXY intercept for Fake-IP and proxy traffic
+				# TPROXY intercept for Fake-IP and foreign traffic
 				ip daddr 198.18.0.0/16 meta l4proto { tcp, udp } meta mark set $FWMARK tproxy to :$TPROXY_PORT accept
 				meta l4proto { tcp, udp } meta mark set $FWMARK tproxy to :$TPROXY_PORT accept
 			}

@@ -1,13 +1,11 @@
 #!/usr/bin/lua
 
 local uci = require("uci").cursor()
-local sys = require("luci.sys")
 local nixio = require("nixio")
 local jsonc = require("luci.jsonc")
 
 local CONFIG = "owall"
 
--- Base64 decode helper
 local function b64decode(data)
 	if not data or data == "" then return "" end
 	data = data:gsub("%s+", ""):gsub("-", "+"):gsub("_", "/")
@@ -16,7 +14,6 @@ local function b64decode(data)
 	return nixio.bin.b64decode(data) or ""
 end
 
--- URL decode helper
 local function urldecode(s)
 	if not s then return "" end
 	s = s:gsub("+", " ")
@@ -24,19 +21,16 @@ local function urldecode(s)
 	return s
 end
 
--- Parse query string
 local function parse_query(qs)
 	local t = {}
 	if not qs or qs == "" then return t end
-	for k, v in qs:gmatch("([^&=?]+)=([^&=?]+)") do
+	for k, v in qs:gmatch("([^&=?]+)=([^&=?]*)") do
 		t[k] = urldecode(v)
 	end
 	return t
 end
 
--- Node Parsers
 local function parse_vless(link)
-	-- vless://uuid@host:port?params#remarks
 	local user, host, port, qs, remarks = link:match("^vless://([^@]+)@([^:?]+):(%d+)/?%??([^#]*)#?(.*)$")
 	if not host then return nil end
 	local q = parse_query(qs)
@@ -50,39 +44,20 @@ local function parse_vless(link)
 		encryption = q.encryption or "none",
 		security = q.security or "none",
 		sni = q.sni or q.host or host,
+		host = q.host or q.sni or host,
 		alpn = q.alpn or "",
 		fp = q.fp or "chrome",
 		pbk = q.pbk or "",
 		sid = q.sid or "",
-		spx = q.spx or "",
+		spx = q.spx or "/",
 		network = q.type or "tcp",
-		path = q.path or ""
-	}
-end
-
-local function parse_hysteria2(link)
-	-- hysteria2://password@host:port?params#remarks
-	local user, host, port, qs, remarks = link:match("^hysteria2://([^@]+)@([^:?]+):(%d+)/?%??([^#]*)#?(.*)$")
-	if not host then
-		user, host, port, qs, remarks = link:match("^hy2://([^@]+)@([^:?]+):(%d+)/?%??([^#]*)#?(.*)$")
-	end
-	if not host then return nil end
-	local q = parse_query(qs)
-	return {
-		type = "hysteria2",
-		remarks = urldecode(remarks ~= "" and remarks or (host .. ":" .. port)),
-		address = host,
-		port = port,
-		password = user,
-		sni = q.sni or host,
-		insecure = q.insecure == "1" and "1" or "0",
-		alpn = q.alpn or "",
-		ports = q.mport or port
+		path = q.path or "/",
+		mode = q.mode or "auto",
+		serviceName = q.serviceName or ""
 	}
 end
 
 local function parse_trojan(link)
-	-- trojan://password@host:port?params#remarks
 	local user, host, port, qs, remarks = link:match("^trojan://([^@]+)@([^:?]+):(%d+)/?%??([^#]*)#?(.*)$")
 	if not host then return nil end
 	local q = parse_query(qs)
@@ -92,26 +67,36 @@ local function parse_trojan(link)
 		address = host,
 		port = port,
 		password = user,
-		sni = q.sni or q.peer or host,
+		security = q.security or "tls",
+		sni = q.sni or q.peer or q.host or host,
+		host = q.host or q.sni or host,
 		alpn = q.alpn or "",
-		security = "tls"
+		fp = q.fp or "chrome",
+		pbk = q.pbk or "",
+		sid = q.sid or "",
+		network = q.type or "tcp",
+		path = q.path or "/",
+		serviceName = q.serviceName or ""
 	}
 end
 
 local function parse_ss(link)
-	-- ss://base64(method:password)@host:port#remarks or ss://base64#remarks
 	local body, remarks = link:match("^ss://([^#]+)#?(.*)$")
 	if not body then return nil end
 	remarks = urldecode(remarks)
 	local userinfo, host, port
 	if body:find("@") then
-		userinfo, host, port = body:match("([^@]+)@([^:]+):(%d+)")
-		userinfo = b64decode(userinfo)
+		userinfo, host, port = body:match("([^@]+)@([^:?]+):(%d+)")
+		if userinfo and not userinfo:find(":") then
+			userinfo = b64decode(userinfo)
+		else
+			userinfo = urldecode(userinfo)
+		end
 	else
 		local dec = b64decode(body)
-		userinfo, host, port = dec:match("([^@]+)@([^:]+):(%d+)")
+		userinfo, host, port = dec:match("([^@]+)@([^:?]+):(%d+)")
 	end
-	if not host then return nil end
+	if not host or not userinfo then return nil end
 	local method, password = userinfo:match("([^:]+):(.*)")
 	if not method then return nil end
 	return {
@@ -125,7 +110,6 @@ local function parse_ss(link)
 end
 
 local function parse_vmess(link)
-	-- vmess://base64(json)
 	local body = link:match("^vmess://(.*)$")
 	if not body then return nil end
 	local decoded = b64decode(body)
@@ -138,24 +122,43 @@ local function parse_vmess(link)
 		port = tostring(info.port),
 		uuid = info.id,
 		alterId = tostring(info.aid or 0),
-		security = info.tls or "none",
+		security = (info.tls == "tls") and "tls" or "none",
 		network = info.net or "tcp",
 		sni = info.sni or info.host or info.add,
-		path = info.path or ""
+		host = info.host or info.sni or info.add,
+		path = info.path or "/",
+		fp = info.fp or "chrome"
+	}
+end
+
+local function parse_hysteria2(link)
+	local user, host, port, qs, remarks = link:match("^hysteria2://([^@]+)@([^:?]+):(%d+)/?%??([^#]*)#?(.*)$")
+	if not host then
+		user, host, port, qs, remarks = link:match("^hy2://([^@]+)@([^:?]+):(%d+)/?%??([^#]*)#?(.*)$")
+	end
+	if not host then return nil end
+	local q = parse_query(qs)
+	return {
+		type = "hysteria2",
+		remarks = urldecode(remarks ~= "" and remarks or (host .. ":" .. port)),
+		address = host,
+		port = port,
+		password = user,
+		sni = q.sni or host,
+		insecure = q.insecure == "1" and "1" or "0"
 	}
 end
 
 local function parse_line(line)
 	line = line:gsub("%s+$", ""):gsub("^%s+", "")
 	if line:find("^vless://") then return parse_vless(line) end
-	if line:find("^hysteria2://") or line:find("^hy2://") then return parse_hysteria2(line) end
 	if line:find("^trojan://") then return parse_trojan(line) end
 	if line:find("^ss://") then return parse_ss(line) end
 	if line:find("^vmess://") then return parse_vmess(line) end
+	if line:find("^hysteria2://") or line:find("^hy2://") then return parse_hysteria2(line) end
 	return nil
 end
 
--- Main update routine
 local function run()
 	local input = uci:get(CONFIG, "global", "node_input") or ""
 	if input == "" then
@@ -164,25 +167,22 @@ local function run()
 	end
 
 	local content = ""
-	-- Check if input is a subscription HTTP/HTTPS URL
 	if input:find("^https?://") then
 		print("Fetching subscription: " .. input)
-		local f = io.popen("curl -sL -k --connect-timeout 10 -m 30 -A 'Owall/1.0' '" .. input .. "'")
+		local f = io.popen("curl -sL -k --connect-timeout 10 -m 30 -A 'Owall/1.1' '" .. input .. "'")
 		if f then
 			content = f:read("*all") or ""
 			f:close()
 		end
-		-- Try base64 decoding subscription content
 		local decoded = b64decode(content)
-		if decoded and (decoded:find("://") or decoded:find("vmess://")) then
+		if decoded and decoded:find("://") then
 			content = decoded
 		end
 	else
 		content = input
 	end
 
-	-- Delete existing nodes in UCI
-	uci:delete_all(CONFIG, "nodes", function(s) return true end)
+	uci:delete_all(CONFIG, "nodes", function() return true end)
 
 	local count = 0
 	local first_node_id = nil

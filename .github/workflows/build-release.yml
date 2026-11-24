@@ -146,7 +146,7 @@ jobs:
           cat > release-notes.md << 'EOF'
           ## Owall (`luci-app-owall`) ${{ needs.meta.outputs.tag }}
 
-          OpenWrt 极简全自动透明代理插件（Sing-box + FakeDNS 0ms + nftables 国内硬件级硬直通）。
+          OpenWrt 极简全自动透明代理插件（Xray-core + FakeDNS 0ms + nftables 国内硬件级硬直通）。
 
           ### 包含安装包
           - **IPK（适用于 OpenWrt 21.02 ~ 24.10 / opkg）**：`luci-app-owall_*.ipk` + `luci-i18n-owall-zh-cn_*.ipk`

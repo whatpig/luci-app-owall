@@ -3,6 +3,7 @@
 TPROXY_PORT=1081
 DNS_PORT=5335
 FWMARK=0x1
+XRAY_MARK=0xff
 ROUTETABLE=100
 
 start_iptables() {
@@ -30,12 +31,14 @@ start_iptables() {
 	fi
 
 	iptables -t nat -N OWALL_DNS 2>/dev/null || iptables -t nat -F OWALL_DNS
+	iptables -t nat -A OWALL_DNS -m mark --mark $XRAY_MARK -j RETURN
 	iptables -t nat -A OWALL_DNS -p udp --dport 53 -j REDIRECT --to-ports $DNS_PORT
 	iptables -t nat -A OWALL_DNS -p tcp --dport 53 -j REDIRECT --to-ports $DNS_PORT
 	iptables -t nat -I PREROUTING -p udp --dport 53 -j OWALL_DNS
 	iptables -t nat -I PREROUTING -p tcp --dport 53 -j OWALL_DNS
 
 	iptables -t mangle -N OWALL 2>/dev/null || iptables -t mangle -F OWALL
+	iptables -t mangle -A OWALL -m mark --mark $XRAY_MARK -j RETURN
 	iptables -t mangle -A OWALL -m set --match-set owall_direct dst -j RETURN
 	iptables -t mangle -A OWALL -p tcp -j TPROXY --tproxy-mark $FWMARK --on-port $TPROXY_PORT
 	iptables -t mangle -A OWALL -p udp -j TPROXY --tproxy-mark $FWMARK --on-port $TPROXY_PORT

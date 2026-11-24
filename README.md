@@ -12,8 +12,8 @@
 - ⚡ **单开关极致极简**：无多余标签页，全自动最佳实践预设。
 - 🛡️ **国内网络坚若磐石**：nftables 底层三层网卡级硬直通（`@owall_direct`），微信音视频、国服手游、网银安全 100% 直连无误杀。
 - 🚀 **海外访问 0ms 秒开**：全自动 FakeDNS（`198.18.0.0/16`）零污染、零泄露，域名在远端 VPS 服务器端高效解析。
-- 📦 **超低内存占用（< 35MB）**：Dnsmasq 纯转发（零规则注入），搭配现代化精简 Sing-box 内核，杜绝旧版断网与丢包问题。
-- 🔄 **全协议与全自动故障切换**：原生支持 `VLESS (Reality / Vision)`、`Hysteria 2`、`TUIC`、`Trojan`、`VMess`、`Shadowsocks`，后台智能优选最低延迟节点。
+- 📦 **超低内存占用**：Dnsmasq 纯转发（零规则注入），全面收敛至单一 **Xray-core** 内核，原生支持 Reality / Vision / XHTTP / WS / gRPC 等前沿传输。
+- 🔄 **全协议与全自动故障切换**：原生支持 `VLESS (Reality / Vision / XHTTP)`、`Trojan`、`VMess`、`Shadowsocks`、`Hysteria 2`，后台智能优选最低延迟节点。
 
 ---
 
@@ -26,14 +26,14 @@
 #### OpenWrt 21.02 ~ 24.10（`opkg` / `.ipk`）
 ```bash
 opkg update
-opkg install sing-box v2ray-geoip v2ray-geosite kmod-nft-tproxy nftables
+opkg install xray-core v2ray-geoip v2ray-geosite kmod-nft-tproxy nftables
 opkg install luci-app-owall_*.ipk luci-i18n-owall-zh-cn_*.ipk
 ```
 
 #### OpenWrt 25.12+ / Snapshot（`apk` / `.apk`）
 ```bash
 apk update
-apk add sing-box v2ray-geoip v2ray-geosite kmod-nft-tproxy nftables
+apk add xray-core v2ray-geoip v2ray-geosite kmod-nft-tproxy nftables
 apk add --allow-untrusted luci-app-owall-*.apk luci-i18n-owall-zh-cn-*.apk
 ```
 
