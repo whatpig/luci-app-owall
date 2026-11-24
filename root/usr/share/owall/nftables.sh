@@ -35,14 +35,24 @@ start_nftables() {
 				}
 			}
 
+			chain dstnat {
+				type nat hook prerouting priority dstnat; policy accept;
+
+				# Bypass Xray-core self-marked traffic
+				meta mark $XRAY_MARK return
+
+				# Redirect LAN DNS queries to Xray dns-in
+				meta l4proto { tcp, udp } th dport 53 redirect to :$DNS_PORT
+			}
+
 			chain prerouting {
-				type filter hook prerouting priority mangle - 150; policy accept;
+				type filter hook prerouting priority mangle; policy accept;
 
 				# Bypass Xray-core self-marked outbound traffic (sockopt.mark = 255)
 				meta mark $XRAY_MARK return
 
-				# Direct DNS redirect for LAN clients
-				meta l4proto { tcp, udp } th dport 53 redirect to :$DNS_PORT
+				# Skip DNS (already handled by dstnat redirect)
+				meta l4proto { tcp, udp } th dport 53 return
 
 				# Direct bypass for private, LAN, VPS node, and China IP addresses
 				ip daddr @owall_direct return
@@ -63,18 +73,18 @@ start_nftables() {
 	# Add GeoIP CN to direct set if china.txt / geoview exists
 	if [ -f "/usr/share/v2ray/china.txt" ]; then
 		awk '{print "add element inet owall owall_direct { "$1" }"}' /usr/share/v2ray/china.txt | nft -f - 2>/dev/null || true
-	elif command -v geoview >/dev/null 2>&1; then
+	elif command -v geoview >/dev/null 2>&1 && [ -f "/usr/share/v2ray/geoip.dat" ]; then
 		geoview -i /usr/share/v2ray/geoip.dat -c cn -4 2>/dev/null | awk '{print "add element inet owall owall_direct { "$1" }"}' | nft -f - 2>/dev/null || true
 	fi
 
-	echo "Owall nftables rules successfully applied."
+	echo "[nftables] Owall nftables rules successfully applied."
 }
 
 stop_nftables() {
 	nft delete table inet owall 2>/dev/null || true
 	ip rule del fwmark $FWMARK table $ROUTETABLE 2>/dev/null || true
 	ip route del local default dev lo table $ROUTETABLE 2>/dev/null || true
-	echo "Owall nftables rules cleaned up."
+	echo "[nftables] Owall nftables rules cleaned up."
 }
 
 case "$1" in

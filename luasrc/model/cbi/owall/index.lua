@@ -1,4 +1,5 @@
-local uci = require("luci.model.uci").cursor()
+local uci_mod = require("luci.model.uci")
+local uci = uci_mod.cursor()
 local sys = require("luci.sys")
 
 local m = Map("owall", translate("Owall"), translate("Ultra-Lightweight, Zero-Config Transparent Proxy for OpenWrt."))
@@ -19,7 +20,7 @@ o_enabled.default = "0"
 o_enabled.rmempty = false
 
 -- 2. Single Input for Subscription or Node Share Links
-local o_input = s:option(TextValue, "node_input", translate("Import Subscription / Nodes"), 
+local o_input = s:option(TextValue, "node_input", translate("Import Subscription / Nodes"),
 	translate("Paste your Subscription URL (http/https) or node share links (vless://, hysteria2://, trojan://, ss://, vmess://) here.<br/>Multiple lines supported. Automatically parsed on Save & Apply."))
 o_input.rows = 4
 o_input.wrap = "off"
@@ -34,17 +35,18 @@ uci:foreach("owall", "nodes", function(n)
 	o_node:value(n[".name"], label)
 end)
 
--- Commit hook: Automatically trigger sub_parser and apply service changes
+-- Commit hook: use a FRESH UCI cursor so newly saved values are read accurately
 function m.on_after_commit(self)
-	local enabled = uci:get("owall", "global", "enabled")
-	local input = uci:get("owall", "global", "node_input") or ""
+	local cur = uci_mod.cursor()
+	local enabled = cur:get("owall", "global", "enabled")
+	local input = cur:get("owall", "global", "node_input") or ""
 
 	if input ~= "" then
-		sys.call("lua /usr/share/owall/sub_parser.lua >/dev/null 2>&1")
+		sys.call("lua /usr/share/owall/sub_parser.lua >> /var/log/owall.log 2>&1")
 	end
 
 	if enabled == "1" then
-		sys.call("/etc/init.d/owall restart >/dev/null 2>&1")
+		sys.call("/etc/init.d/owall restart >> /var/log/owall.log 2>&1")
 	else
 		sys.call("/etc/init.d/owall stop >/dev/null 2>&1")
 	end

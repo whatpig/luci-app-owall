@@ -1,8 +1,8 @@
 #!/usr/bin/lua
 
-local uci = require("uci").cursor()
+local uci = require("luci.model.uci").cursor()
 local jsonc = require("luci.jsonc")
-local nixio = require("nixio")
+local fs = require("nixio.fs")
 
 local CONFIG = "owall"
 local OUT_FILE = "/var/etc/owall.json"
@@ -12,6 +12,16 @@ local function is_ip(addr)
 	if addr:match("^%d+%.%d+%.%d+%.%d+$") then return true end
 	if addr:find(":") then return true end
 	return false
+end
+
+local function has_geo_files()
+	local dirs = { "/usr/share/v2ray", "/usr/share/xray" }
+	for _, d in ipairs(dirs) do
+		if fs.access(d .. "/geoip.dat") and fs.access(d .. "/geosite.dat") then
+			return true, d
+		end
+	end
+	return false, "/usr/share/v2ray"
 end
 
 local function get_system_dns()
@@ -221,20 +231,80 @@ local function build_proxy_outbound(node)
 	}
 end
 
+local function find_first_node()
+	local first_id = nil
+	uci:foreach(CONFIG, "nodes", function(s)
+		if not first_id then
+			first_id = s[".name"]
+		end
+	end)
+	return first_id
+end
+
 local function generate()
 	local active_id = uci:get(CONFIG, "global", "active_node")
+	if not active_id or active_id == "" or not uci:get(CONFIG, active_id) then
+		active_id = find_first_node()
+		if active_id then
+			uci:set(CONFIG, "global", "active_node", active_id)
+			uci:commit(CONFIG)
+		end
+	end
+
 	local node = active_id and uci:get_all(CONFIG, active_id) or nil
-	local tproxy_port = tonumber(uci:get(CONFIG, "global", "tproxy_port") or "1081")
-	local socks_port = tonumber(uci:get(CONFIG, "global", "socks_port") or "1080")
-	local dns_port = tonumber(uci:get(CONFIG, "global", "dns_port") or "5335")
+	local tproxy_port = tonumber(uci:get(CONFIG, "global", "tproxy_port")) or 1081
+	local socks_port = tonumber(uci:get(CONFIG, "global", "socks_port")) or 1080
+	local dns_port = tonumber(uci:get(CONFIG, "global", "dns_port")) or 5335
 
 	local local_dns = get_system_dns()
 	local proxy_outbound = build_proxy_outbound(node)
+	local geo_ok = has_geo_files()
 
-	-- Direct DNS domains: domestic sites + private + VPS hostname (to prevent DNS loop)
-	local direct_domains = { "geosite:private", "geosite:cn" }
+	-- Build DNS servers
+	local dns_servers = {}
+	local direct_domains = {}
 	if node and node.address and not is_ip(node.address) then
-		table.insert(direct_domains, 1, "full:" .. node.address:lower())
+		table.insert(direct_domains, "full:" .. node.address:lower())
+	end
+	if geo_ok then
+		table.insert(direct_domains, "geosite:private")
+		table.insert(direct_domains, "geosite:cn")
+	end
+	if #direct_domains > 0 then
+		table.insert(dns_servers, {
+			address = local_dns,
+			port = 53,
+			domains = direct_domains
+		})
+	end
+	table.insert(dns_servers, "fakedns")
+
+	-- Build routing rules
+	local routing_rules = {
+		{
+			type = "field",
+			inboundTag = { "dns-in" },
+			outboundTag = "dns-out"
+		},
+		{
+			type = "field",
+			inboundTag = { "dns-global" },
+			outboundTag = "direct"
+		}
+	}
+	if geo_ok then
+		table.insert(routing_rules, {
+			type = "field",
+			ip = { "geoip:private", "geoip:cn" },
+			outboundTag = "direct"
+		})
+		table.insert(routing_rules, {
+			type = "field",
+			domain = { "geosite:private", "geosite:cn" },
+			outboundTag = "direct"
+		})
+	else
+		print("[gen_config] WARNING: geoip.dat/geosite.dat not found; running without geo rules.")
 	end
 
 	local config = {
@@ -250,19 +320,12 @@ local function generate()
 		dns = {
 			tag = "dns-global",
 			queryStrategy = "UseIPv4",
-			servers = {
-				{
-					address = local_dns,
-					port = 53,
-					domains = direct_domains
-				},
-				"fakedns"
-			}
+			servers = dns_servers
 		},
 		inbounds = {
 			{
 				tag = "dns-in",
-				listen = "127.0.0.1",
+				listen = "0.0.0.0",
 				port = dns_port,
 				protocol = "dokodemo-door",
 				settings = {
@@ -327,39 +390,19 @@ local function generate()
 		},
 		routing = {
 			domainStrategy = "IPIfNonMatch",
-			rules = {
-				{
-					type = "field",
-					inboundTag = { "dns-in" },
-					outboundTag = "dns-out"
-				},
-				{
-					type = "field",
-					inboundTag = { "dns-global" },
-					outboundTag = "direct"
-				},
-				{
-					type = "field",
-					ip = { "geoip:private", "geoip:cn" },
-					outboundTag = "direct"
-				},
-				{
-					type = "field",
-					domain = { "geosite:private", "geosite:cn" },
-					outboundTag = "direct"
-				}
-			}
+			rules = routing_rules
 		}
 	}
 
-	nixio.fs.mkdirr("/var/etc")
+	fs.mkdirr("/var/etc")
 	local f = io.open(OUT_FILE, "w")
 	if f then
 		f:write(jsonc.stringify(config, true))
 		f:close()
-		print("Successfully generated Xray-core configuration at " .. OUT_FILE)
+		print("[gen_config] Successfully generated Xray-core configuration at " .. OUT_FILE)
 	else
-		print("Failed to open " .. OUT_FILE .. " for writing.")
+		print("[gen_config] ERROR: Failed to open " .. OUT_FILE .. " for writing.")
+		os.exit(1)
 	end
 end
 

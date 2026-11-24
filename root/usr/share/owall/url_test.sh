@@ -2,14 +2,19 @@
 
 CONFIG="owall"
 STATUS_FILE="/tmp/owall_status.json"
+LOG_FILE="/var/log/owall.log"
+
+json_escape() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\r\n' '  '
+}
 
 test_node() {
 	local node_id="$1"
-	[ -z "$node_id" ] && return 9999
+	[ -z "$node_id" ] && { echo 9999; return; }
 
 	local addr=$(uci -q get owall.${node_id}.address)
 	local port=$(uci -q get owall.${node_id}.port)
-	[ -z "$addr" ] || [ -z "$port" ] && return 9999
+	[ -z "$addr" ] || [ -z "$port" ] && { echo 9999; return; }
 
 	local latency=9999
 	if command -v tcping >/dev/null 2>&1; then
@@ -42,9 +47,8 @@ auto_select_best() {
 		uci -q set owall.global.active_node="$best_node"
 		uci -q commit owall
 		echo "Best node selected: $best_node ($min_latency ms)"
-		# Reload configuration if running
-		if pidof xray >/dev/null 2>&1; then
-			/usr/share/owall/app.sh reload
+		if pgrep -f "/var/etc/owall.json" >/dev/null 2>&1; then
+			/etc/init.d/owall restart >/dev/null 2>&1
 		fi
 	fi
 }
@@ -60,20 +64,31 @@ check_status() {
 	fi
 
 	local running=0
-	pidof xray >/dev/null 2>&1 && running=1
+	if pgrep -f "/var/etc/owall.json" >/dev/null 2>&1 || pidof xray >/dev/null 2>&1; then
+		running=1
+	fi
 
 	local google_ok=0
 	if [ "$running" -eq 1 ]; then
-		curl -sIL -k -m 3 --socks5 127.0.0.1:1080 https://www.google.com >/dev/null 2>&1 && google_ok=1
+		curl -sIL -k -m 3 --socks5-hostname 127.0.0.1:1080 https://www.google.com >/dev/null 2>&1 && google_ok=1
 	fi
+
+	local last_log=""
+	if [ -f "$LOG_FILE" ]; then
+		last_log=$(tail -n 3 "$LOG_FILE" | tr '\n' ' ')
+	fi
+
+	local esc_remarks=$(json_escape "$remarks")
+	local esc_log=$(json_escape "$last_log")
 
 	cat <<-EOF > "$STATUS_FILE"
 		{
 			"running": $running,
 			"active_node": "$active_node",
-			"remarks": "$remarks",
+			"remarks": "$esc_remarks",
 			"latency": "$latency",
-			"google": $google_ok
+			"google": $google_ok,
+			"last_log": "$esc_log"
 		}
 	EOF
 }

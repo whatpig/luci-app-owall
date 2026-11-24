@@ -3,9 +3,19 @@
 CONFIG="owall"
 CORE_BIN="xray"
 CONFIG_FILE="/var/etc/owall.json"
-PID_FILE="/var/run/owall.pid"
+LOG_FILE="/var/log/owall.log"
 
-export XRAY_LOCATION_ASSET="/usr/share/v2ray"
+detect_asset_dir() {
+	if [ -f "/usr/share/v2ray/geoip.dat" ] && [ -f "/usr/share/v2ray/geosite.dat" ]; then
+		echo "/usr/share/v2ray"
+	elif [ -f "/usr/share/xray/geoip.dat" ] && [ -f "/usr/share/xray/geosite.dat" ]; then
+		echo "/usr/share/xray"
+	else
+		echo "/usr/share/v2ray"
+	fi
+}
+
+export XRAY_LOCATION_ASSET="$(detect_asset_dir)"
 
 has_nft() {
 	command -v nft >/dev/null 2>&1
@@ -26,49 +36,54 @@ stop_firewall() {
 	/usr/share/owall/iptables.sh stop
 }
 
-generate_config() {
-	mkdir -p /var/etc
-	lua /usr/share/owall/gen_config.lua
+prepare() {
+	mkdir -p /var/etc /var/log
+
+	if ! command -v "$CORE_BIN" >/dev/null 2>&1; then
+		echo "ERROR: $CORE_BIN not found in PATH! Please install xray-core."
+		return 1
+	fi
+
+	# Always parse node_input if present so saved changes take effect immediately
+	local input=$(uci -q get owall.global.node_input)
+	if [ -n "$input" ]; then
+		lua /usr/share/owall/sub_parser.lua || return 1
+	fi
+
+	lua /usr/share/owall/gen_config.lua || return 1
+
+	if ! "$CORE_BIN" run -test -c "$CONFIG_FILE"; then
+		echo "ERROR: Xray configuration test failed!"
+		return 1
+	fi
+	return 0
 }
 
 run() {
 	local enabled=$(uci -q get owall.global.enabled)
 	[ "$enabled" = "1" ] || exit 0
 
-	# Ensure nodes are populated
-	local active=$(uci -q get owall.global.active_node)
-	if [ -z "$active" ]; then
-		lua /usr/share/owall/sub_parser.lua
-	fi
+	[ -f "$CONFIG_FILE" ] || prepare >> "$LOG_FILE" 2>&1 || exit 1
 
-	generate_config
-
-	if ! command -v "$CORE_BIN" >/dev/null 2>&1; then
-		echo "ERROR: $CORE_BIN not found in PATH! Please install xray-core."
-		exit 1
-	fi
-
-	echo "Starting Xray-core ($CORE_BIN) with $CONFIG_FILE..."
-	exec "$CORE_BIN" run -c "$CONFIG_FILE"
+	echo "[$(date '+%F %T')] Launching Xray-core ($CORE_BIN) with $CONFIG_FILE (asset=$XRAY_LOCATION_ASSET)..." >> "$LOG_FILE"
+	exec "$CORE_BIN" run -c "$CONFIG_FILE" >> "$LOG_FILE" 2>&1
 }
 
 kill_all() {
-	killall -9 "$CORE_BIN" 2>/dev/null || true
-	rm -f "$PID_FILE"
+	local pids=$(pgrep -f "$CONFIG_FILE" 2>/dev/null)
+	[ -n "$pids" ] && kill -9 $pids 2>/dev/null || true
 }
 
 reload() {
-	generate_config
-	kill_all
-	run &
-	start_firewall
+	/etc/init.d/owall restart
 }
 
 case "$1" in
+	prepare) prepare ;;
 	run) run ;;
 	start_firewall) start_firewall ;;
 	stop_firewall) stop_firewall ;;
 	kill_all) kill_all ;;
 	reload) reload ;;
-	*) echo "Usage: $0 {run|start_firewall|stop_firewall|kill_all|reload}" ;;
+	*) echo "Usage: $0 {prepare|run|start_firewall|stop_firewall|kill_all|reload}" ;;
 esac

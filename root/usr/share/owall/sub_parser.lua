@@ -1,6 +1,6 @@
 #!/usr/bin/lua
 
-local uci = require("uci").cursor()
+local uci = require("luci.model.uci").cursor()
 local nixio = require("nixio")
 local jsonc = require("luci.jsonc")
 
@@ -30,16 +30,26 @@ local function parse_query(qs)
 	return t
 end
 
+local function split_host_port(hp)
+	if not hp then return nil, nil end
+	local h, p = hp:match("^%[([^%]]+)%]:(%d+)$")
+	if h and p then return h, p end
+	return hp:match("^([^:/?]+):(%d+)$")
+end
+
 local function parse_vless(link)
-	local user, host, port, qs, remarks = link:match("^vless://([^@]+)@([^:?]+):(%d+)/?%??([^#]*)#?(.*)$")
+	local user, hp, rest = link:match("^vless://([^@]+)@([^/?#]+)(.*)$")
+	local host, port = split_host_port(hp)
 	if not host then return nil end
+	local qs = rest:match("%?([^#]*)") or ""
+	local remarks = rest:match("#(.*)$") or ""
 	local q = parse_query(qs)
 	return {
 		type = "vless",
 		remarks = urldecode(remarks ~= "" and remarks or (host .. ":" .. port)),
 		address = host,
 		port = port,
-		uuid = user,
+		uuid = urldecode(user),
 		flow = q.flow or "",
 		encryption = q.encryption or "none",
 		security = q.security or "none",
@@ -58,15 +68,18 @@ local function parse_vless(link)
 end
 
 local function parse_trojan(link)
-	local user, host, port, qs, remarks = link:match("^trojan://([^@]+)@([^:?]+):(%d+)/?%??([^#]*)#?(.*)$")
+	local user, hp, rest = link:match("^trojan://([^@]+)@([^/?#]+)(.*)$")
+	local host, port = split_host_port(hp)
 	if not host then return nil end
+	local qs = rest:match("%?([^#]*)") or ""
+	local remarks = rest:match("#(.*)$") or ""
 	local q = parse_query(qs)
 	return {
 		type = "trojan",
 		remarks = urldecode(remarks ~= "" and remarks or (host .. ":" .. port)),
 		address = host,
 		port = port,
-		password = user,
+		password = urldecode(user),
 		security = q.security or "tls",
 		sni = q.sni or q.peer or q.host or host,
 		host = q.host or q.sni or host,
@@ -84,9 +97,10 @@ local function parse_ss(link)
 	local body, remarks = link:match("^ss://([^#]+)#?(.*)$")
 	if not body then return nil end
 	remarks = urldecode(remarks)
-	local userinfo, host, port
+	body = body:match("^([^?]+)") or body
+	local userinfo, hp
 	if body:find("@") then
-		userinfo, host, port = body:match("([^@]+)@([^:?]+):(%d+)")
+		userinfo, hp = body:match("([^@]+)@(.+)")
 		if userinfo and not userinfo:find(":") then
 			userinfo = b64decode(userinfo)
 		else
@@ -94,8 +108,9 @@ local function parse_ss(link)
 		end
 	else
 		local dec = b64decode(body)
-		userinfo, host, port = dec:match("([^@]+)@([^:?]+):(%d+)")
+		userinfo, hp = dec:match("([^@]+)@(.+)")
 	end
+	local host, port = split_host_port(hp)
 	if not host or not userinfo then return nil end
 	local method, password = userinfo:match("([^:]+):(.*)")
 	if not method then return nil end
@@ -132,18 +147,21 @@ local function parse_vmess(link)
 end
 
 local function parse_hysteria2(link)
-	local user, host, port, qs, remarks = link:match("^hysteria2://([^@]+)@([^:?]+):(%d+)/?%??([^#]*)#?(.*)$")
-	if not host then
-		user, host, port, qs, remarks = link:match("^hy2://([^@]+)@([^:?]+):(%d+)/?%??([^#]*)#?(.*)$")
+	local user, hp, rest = link:match("^hysteria2://([^@]+)@([^/?#]+)(.*)$")
+	if not hp then
+		user, hp, rest = link:match("^hy2://([^@]+)@([^/?#]+)(.*)$")
 	end
+	local host, port = split_host_port(hp)
 	if not host then return nil end
+	local qs = rest:match("%?([^#]*)") or ""
+	local remarks = rest:match("#(.*)$") or ""
 	local q = parse_query(qs)
 	return {
 		type = "hysteria2",
 		remarks = urldecode(remarks ~= "" and remarks or (host .. ":" .. port)),
 		address = host,
 		port = port,
-		password = user,
+		password = urldecode(user),
 		sni = q.sni or host,
 		insecure = q.insecure == "1" and "1" or "0"
 	}
@@ -161,15 +179,17 @@ end
 
 local function run()
 	local input = uci:get(CONFIG, "global", "node_input") or ""
+	input = input:gsub("^%s+", ""):gsub("%s+$", "")
 	if input == "" then
-		print("No node or subscription input found.")
+		print("[sub_parser] No node or subscription input found.")
 		return
 	end
 
 	local content = ""
 	if input:find("^https?://") then
-		print("Fetching subscription: " .. input)
-		local f = io.popen("curl -sL -k --connect-timeout 10 -m 30 -A 'Owall/1.1' '" .. input .. "'")
+		print("[sub_parser] Fetching subscription: " .. input)
+		local safe_url = input:gsub("'", "'\\''")
+		local f = io.popen("curl -sL -k --connect-timeout 10 -m 30 -A 'Owall/1.1' '" .. safe_url .. "'")
 		if f then
 			content = f:read("*all") or ""
 			f:close()
@@ -182,7 +202,7 @@ local function run()
 		content = input
 	end
 
-	uci:delete_all(CONFIG, "nodes", function() return true end)
+	uci:delete_all(CONFIG, "nodes")
 
 	local count = 0
 	local first_node_id = nil
@@ -200,14 +220,14 @@ local function run()
 	end
 
 	if count > 0 then
-		print(string.format("Successfully parsed and imported %d nodes.", count))
+		print(string.format("[sub_parser] Successfully parsed and imported %d nodes.", count))
 		local active = uci:get(CONFIG, "global", "active_node")
 		if not active or active == "" or not uci:get(CONFIG, active) then
 			uci:set(CONFIG, "global", "active_node", first_node_id)
 		end
 		uci:commit(CONFIG)
 	else
-		print("No valid nodes could be parsed from input.")
+		print("[sub_parser] ERROR: No valid nodes could be parsed from input.")
 	end
 end
 
