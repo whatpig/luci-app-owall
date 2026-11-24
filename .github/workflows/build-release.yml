@@ -84,8 +84,10 @@ jobs:
             -e 's|git\.openwrt\.org/openwrt|github.com/openwrt|g' \
             feeds.conf.default
 
-          # Only luci feed is required to build pure-Lua/Shell luci-app-owall + zh-cn i18n
-          ./scripts/feeds update luci
+          # Update base + luci feeds so luci-base/luci-compat/rpcd-mod-luci headers resolve cleanly
+          # without pulling in heavy Go/Rust packages feed builds
+          ./scripts/feeds update base luci
+          ./scripts/feeds install -a -p base
           ./scripts/feeds install -a -p luci
 
           # Place luci-app-owall directly into sdk/package/
