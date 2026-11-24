@@ -160,7 +160,7 @@ function owallAutoBest() {
 }
 
 updateOwallStatus();
-XHR.poll(5, '<%=luci.dispatcher.build_url("admin", "services", "owall", "status")%>', null, function(x, info) {
+XHR.poll(10, '<%=luci.dispatcher.build_url("admin", "services", "owall", "status")%>', null, function(x, info) {
 	renderOwallStatus(info);
 });
 //]]></script>

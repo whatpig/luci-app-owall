@@ -8,6 +8,12 @@ json_escape() {
 	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\r\n' '  '
 }
 
+is_owall_running() {
+	ps w 2>/dev/null | grep -q "[/ ]var/etc/owall.json" && return 0
+	pidof xray >/dev/null 2>&1 && return 0
+	return 1
+}
+
 test_node() {
 	local node_id="$1"
 	[ -z "$node_id" ] && { echo 9999; return; }
@@ -47,15 +53,27 @@ auto_select_best() {
 	if [ -n "$best_node" ] && [ "$min_latency" -lt 9999 ]; then
 		uci -q set owall.global.active_node="$best_node"
 		uci -q commit owall
+		rm -f "$STATUS_FILE"
 		echo "Best node selected: $best_node ($min_latency ms)"
-		if pgrep -f "/var/etc/owall.json" >/dev/null 2>&1; then
+		if is_owall_running; then
 			/etc/init.d/owall restart >/dev/null 2>&1
 		fi
 	fi
 }
 
 check_status() {
+	local force="$1"
+	# 8-second status cache to avoid hammering VPS/uhttpd on rapid polls or multi-tab views
+	if [ "$force" != "force" ] && [ -f "$STATUS_FILE" ]; then
+		local now=$(date +%s)
+		local mtime=$(date -r "$STATUS_FILE" +%s 2>/dev/null)
+		if [ -n "$mtime" ] && [ $((now - mtime)) -lt 8 ]; then
+			return 0
+		fi
+	fi
+
 	local active_node=$(uci -q get owall.global.active_node)
+	local socks_port=$(uci -q get owall.global.socks_port || echo 1080)
 	local remarks="None"
 	local latency="9999"
 
@@ -65,9 +83,7 @@ check_status() {
 	fi
 
 	local running=0
-	if pgrep -f "/var/etc/owall.json" >/dev/null 2>&1 || pidof xray >/dev/null 2>&1; then
-		running=1
-	fi
+	is_owall_running && running=1
 
 	local fw_ok=0
 	if nft list table inet owall >/dev/null 2>&1 || iptables -t mangle -L OWALL >/dev/null 2>&1; then
@@ -76,7 +92,7 @@ check_status() {
 
 	local google_ok=0
 	if [ "$running" -eq 1 ]; then
-		local code=$(curl -s -o /dev/null -w "%{http_code}" -k -m 5 --socks5-hostname 127.0.0.1:1080 https://www.google.com/generate_204 2>/dev/null)
+		local code=$(curl -s -o /dev/null -w "%{http_code}" -k -m 5 --socks5-hostname "127.0.0.1:${socks_port}" https://www.google.com/generate_204 2>/dev/null)
 		[ "$code" = "204" ] || [ "$code" = "200" ] && google_ok=1
 	fi
 
@@ -87,8 +103,9 @@ check_status() {
 
 	local esc_remarks=$(json_escape "$remarks")
 	local esc_log=$(json_escape "$last_log")
+	local tmp_file="${STATUS_FILE}.tmp.$$"
 
-	cat <<-EOF > "$STATUS_FILE"
+	cat <<-EOF > "$tmp_file"
 		{
 			"running": $running,
 			"fw_ok": $fw_ok,
@@ -99,11 +116,12 @@ check_status() {
 			"last_log": "$esc_log"
 		}
 	EOF
+	mv -f "$tmp_file" "$STATUS_FILE"
 }
 
 case "$1" in
 	auto) auto_select_best ;;
-	status) check_status ;;
+	status) check_status "$2" ;;
 	test) test_node "$2" ;;
-	*) check_status ;;
+	*) check_status "$2" ;;
 esac

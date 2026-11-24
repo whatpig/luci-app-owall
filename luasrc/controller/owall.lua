@@ -21,7 +21,8 @@ function action_status()
 end
 
 function action_sync()
-	luci.sys.call("lua /usr/share/owall/sub_parser.lua >> /var/log/owall.log 2>&1")
+	luci.sys.call("/usr/share/owall/app.sh sync >> /var/log/owall.log 2>&1")
+	luci.sys.call("rm -f /tmp/owall_status.json")
 	luci.sys.call("/etc/init.d/owall restart >> /var/log/owall.log 2>&1")
 	luci.http.prepare_content("application/json")
 	luci.http.write('{"status":"ok"}')
@@ -29,6 +30,7 @@ end
 
 function action_auto_best()
 	luci.sys.call("/usr/share/owall/url_test.sh auto >> /var/log/owall.log 2>&1")
+	luci.sys.call("rm -f /tmp/owall_status.json")
 	luci.http.prepare_content("application/json")
 	luci.http.write('{"status":"ok"}')
 end

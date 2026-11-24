@@ -16,7 +16,6 @@ end
 
 local function urldecode(s)
 	if not s then return "" end
-	s = s:gsub("+", " ")
 	s = s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
 	return s
 end

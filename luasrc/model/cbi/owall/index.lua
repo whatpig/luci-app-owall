@@ -35,18 +35,14 @@ uci:foreach("owall", "nodes", function(n)
 	o_node:value(n[".name"], label)
 end)
 
--- Commit hook: use a FRESH UCI cursor so newly saved values are read accurately
+-- Commit hook: use a FRESH UCI cursor; app.sh prepare handles smart MD5-cached parsing
 function m.on_after_commit(self)
 	local cur = uci_mod.cursor()
 	local enabled = cur:get("owall", "global", "enabled")
-	local input = cur:get("owall", "global", "node_input") or ""
-
-	if input ~= "" then
-		sys.call("lua /usr/share/owall/sub_parser.lua >> /var/log/owall.log 2>&1")
-	end
+	sys.call("rm -f /tmp/owall_status.json")
 
 	if enabled == "1" then
-		sys.call("/etc/init.d/owall restart >> /var/log/owall.log 2>&1")
+		sys.call("/usr/share/owall/app.sh reload >> /var/log/owall.log 2>&1")
 	else
 		sys.call("/etc/init.d/owall stop >/dev/null 2>&1")
 	end

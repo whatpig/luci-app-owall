@@ -85,7 +85,7 @@ local function build_stream_settings(node)
 	if net == "ws" then
 		stream.wsSettings = {
 			path = (node.path and node.path ~= "") and node.path or "/",
-			host = host
+			headers = { Host = host }
 		}
 	elseif net == "httpupgrade" then
 		stream.httpupgradeSettings = {
@@ -376,6 +376,9 @@ local function generate()
 			{
 				tag = "direct",
 				protocol = "freedom",
+				settings = {
+					domainStrategy = "UseIPv4"
+				},
 				streamSettings = {
 					sockopt = {
 						mark = 255

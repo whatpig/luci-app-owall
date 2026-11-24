@@ -1,7 +1,9 @@
 #!/bin/sh
 
-TPROXY_PORT=1081
-DNS_PORT=5335
+TPROXY_PORT=$(uci -q get owall.global.tproxy_port || echo 1081)
+DNS_PORT=$(uci -q get owall.global.dns_port || echo 5335)
+[ -n "$TPROXY_PORT" ] || TPROXY_PORT=1081
+[ -n "$DNS_PORT" ] || DNS_PORT=5335
 FWMARK=0x1
 XRAY_MARK=0xff
 ROUTETABLE=100
