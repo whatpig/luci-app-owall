@@ -260,8 +260,10 @@ local function generate()
 	local proxy_outbound = build_proxy_outbound(node)
 	local geo_ok = has_geo_files()
 
-	-- Build DNS servers
-	local dns_servers = {}
+	-- Build DNS servers:
+	-- servers[1] MUST be "fakedns" so all foreign / unmatched domains get Fake-IP (0ms, zero DNS leak).
+	-- servers[2] is local direct DNS strictly scoped to VPS host + geosite:private + geosite:cn with skipFallback=true.
+	local dns_servers = { "fakedns" }
 	local direct_domains = {}
 	if node and node.address and not is_ip(node.address) then
 		table.insert(direct_domains, "full:" .. node.address:lower())
@@ -274,10 +276,10 @@ local function generate()
 		table.insert(dns_servers, {
 			address = local_dns,
 			port = 53,
-			domains = direct_domains
+			domains = direct_domains,
+			skipFallback = true
 		})
 	end
-	table.insert(dns_servers, "fakedns")
 
 	-- Build routing rules
 	local routing_rules = {
@@ -320,12 +322,13 @@ local function generate()
 		dns = {
 			tag = "dns-global",
 			queryStrategy = "UseIPv4",
+			disableFallback = true,
+			disableFallbackIfMatch = true,
 			servers = dns_servers
 		},
 		inbounds = {
 			{
 				tag = "dns-in",
-				listen = "0.0.0.0",
 				port = dns_port,
 				protocol = "dokodemo-door",
 				settings = {

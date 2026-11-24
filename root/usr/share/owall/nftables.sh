@@ -61,8 +61,8 @@ start_nftables() {
 				# Never redirect Xray self-marked DNS queries
 				meta mark $XRAY_MARK return
 
-				# Redirect all LAN IPv4 DNS queries (UDP/TCP 53) to Xray dns-in
-				ip protocol { tcp, udp } th dport 53 redirect to :$DNS_PORT
+				# Redirect all LAN IPv4 & IPv6 DNS queries (UDP/TCP 53) to Xray dns-in
+				meta l4proto { tcp, udp } th dport 53 redirect to :$DNS_PORT
 			}
 
 			chain prerouting {
@@ -76,7 +76,7 @@ start_nftables() {
 				meta nfproto ipv4 meta l4proto tcp socket transparent 1 meta mark set $FWMARK accept
 
 				# Skip DNS (already handled by dstnat redirect)
-				ip protocol { tcp, udp } th dport 53 return
+				meta l4proto { tcp, udp } th dport 53 return
 
 				# Direct bypass for router local IPs, LAN, VPS node, and China IPs
 				ip daddr @owall_direct return
