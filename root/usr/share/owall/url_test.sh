@@ -19,13 +19,14 @@ test_node() {
 	local latency=9999
 	if command -v tcping >/dev/null 2>&1; then
 		latency=$(tcping -q -c 1 -t 2 "$addr" "$port" 2>/dev/null | awk -F'/' '{print $4}' | cut -d'.' -f1)
-	else
-		local start_t=$(date +%s%3N 2>/dev/null || date +%s)
-		nc -z -w 2 "$addr" "$port" 2>/dev/null
-		if [ $? -eq 0 ]; then
-			local end_t=$(date +%s%3N 2>/dev/null || date +%s)
-			latency=$((end_t - start_t))
-		fi
+	fi
+
+	# Reliable BusyBox-compatible TCP handshake timing via curl %{time_connect}
+	if [ -z "$latency" ] || [ "$latency" = "9999" ]; then
+		local target="$addr:$port"
+		echo "$addr" | grep -q ':' && target="[$addr]:$port"
+		local raw=$(curl -s -o /dev/null --connect-timeout 2 -m 2 -w "%{time_connect}" "http://${target}" 2>/dev/null || true)
+		latency=$(awk -v t="${raw:-0}" 'BEGIN{ms=int(t*1000+0.5); print (ms>0?ms:9999)}')
 	fi
 
 	echo "${latency:-9999}"
@@ -70,7 +71,8 @@ check_status() {
 
 	local google_ok=0
 	if [ "$running" -eq 1 ]; then
-		curl -sIL -k -m 3 --socks5-hostname 127.0.0.1:1080 https://www.google.com >/dev/null 2>&1 && google_ok=1
+		local code=$(curl -s -o /dev/null -w "%{http_code}" -k -m 5 --socks5-hostname 127.0.0.1:1080 https://www.google.com/generate_204 2>/dev/null)
+		[ "$code" = "204" ] || [ "$code" = "200" ] && google_ok=1
 	fi
 
 	local last_log=""

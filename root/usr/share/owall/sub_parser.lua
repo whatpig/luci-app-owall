@@ -185,21 +185,28 @@ local function run()
 		return
 	end
 
-	local content = ""
-	if input:find("^https?://") then
-		print("[sub_parser] Fetching subscription: " .. input)
-		local safe_url = input:gsub("'", "'\\''")
-		local f = io.popen("curl -sL -k --connect-timeout 10 -m 30 -A 'Owall/1.1' '" .. safe_url .. "'")
-		if f then
-			content = f:read("*all") or ""
-			f:close()
+	local lines_to_parse = {}
+	for raw_line in input:gmatch("[^\r\n]+") do
+		raw_line = raw_line:gsub("^%s+", ""):gsub("%s+$", "")
+		if raw_line:find("^https?://") then
+			print("[sub_parser] Fetching subscription: " .. raw_line)
+			local safe_url = raw_line:gsub("'", "'\\''")
+			local f = io.popen("curl -sL -k --connect-timeout 10 -m 30 -A 'Owall/1.1' '" .. safe_url .. "'")
+			local sub_body = ""
+			if f then
+				sub_body = f:read("*all") or ""
+				f:close()
+			end
+			local decoded = b64decode(sub_body)
+			if decoded and decoded:find("://") then
+				sub_body = decoded
+			end
+			for sub_line in sub_body:gmatch("[^\r\n]+") do
+				table.insert(lines_to_parse, sub_line)
+			end
+		elseif raw_line ~= "" then
+			table.insert(lines_to_parse, raw_line)
 		end
-		local decoded = b64decode(content)
-		if decoded and decoded:find("://") then
-			content = decoded
-		end
-	else
-		content = input
 	end
 
 	uci:delete_all(CONFIG, "nodes")
@@ -207,7 +214,7 @@ local function run()
 	local count = 0
 	local first_node_id = nil
 
-	for line in content:gmatch("[^\r\n]+") do
+	for _, line in ipairs(lines_to_parse) do
 		local node = parse_line(line)
 		if node and node.address and node.port then
 			count = count + 1

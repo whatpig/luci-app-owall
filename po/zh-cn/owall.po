@@ -7,6 +7,48 @@ msgstr "Owall 极简代理"
 msgid "Ultra-Lightweight, Zero-Config Transparent Proxy for OpenWrt."
 msgstr "OpenWrt 极简全自动透明代理，零多余配置，一键即用。"
 
+msgid "Owall Status Overview"
+msgstr "运行状态总览"
+
+msgid "Service Status"
+msgstr "服务状态"
+
+msgid "Checking..."
+msgstr "检测中..."
+
+msgid "RUNNING"
+msgstr "运行中"
+
+msgid "STOPPED"
+msgstr "已停止"
+
+msgid "Active Node & Latency"
+msgstr "当前节点与延迟"
+
+msgid "None"
+msgstr "无"
+
+msgid "Timeout"
+msgstr "超时"
+
+msgid "Global Connectivity"
+msgstr "海外连通性"
+
+msgid "Connected (Google OK)"
+msgstr "已连通（Google 正常）"
+
+msgid "Disconnected"
+msgstr "未连通"
+
+msgid "Sync Nodes Now"
+msgstr "立即同步节点"
+
+msgid "Auto-Select Lowest Latency"
+msgstr "自动选择最低延迟"
+
+msgid "Log:"
+msgstr "运行日志："
+
 msgid "Core Control"
 msgstr "核心控制"
 
@@ -20,7 +62,7 @@ msgid "Import Subscription / Nodes"
 msgstr "导入订阅或节点链接"
 
 msgid "Paste your Subscription URL (http/https) or node share links (vless://, hysteria2://, trojan://, ss://, vmess://) here.<br/>Multiple lines supported. Automatically parsed on Save & Apply."
-msgstr "在此粘贴订阅链接（http/https）或单节点分享链接（支持 vless://, hysteria2://, trojan://, ss://, vmess://）。<br/>支持多行粘贴，点击“保存并应用”后后台全自动解析。"
+msgstr "在此粘贴订阅链接（http/https）或自建节点分享链接（支持 vless://, hysteria2://, trojan://, ss://, vmess://）。<br/>支持多行粘贴及订阅与自建节点混填（一行一条），点击“保存并应用”后后台全自动解析。"
 
 msgid "Active Outbound Node"
 msgstr "当前出口节点"
