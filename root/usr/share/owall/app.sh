@@ -96,9 +96,9 @@ kill_all() {
 reload() {
 	mkdir -p /var/lock
 	(
-		flock -n 200 || exit 0
+		flock -n 9 || exit 0
 		/etc/init.d/owall restart
-	) 200>"$LOCK_FILE"
+	) 9>"$LOCK_FILE"
 }
 
 case "$1" in
