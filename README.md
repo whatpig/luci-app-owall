@@ -1,7 +1,7 @@
 # Owall (`luci-app-owall`)
 
 > **OpenWrt 极简全自动透明代理路由插件**
-> 
+>
 > 融合 PassWall 1 的极致轻量与国内直连稳健性 + PassWall 2 的 FakeDNS 0ms 秒开与 nftables 底层硬直通。
 > 抛弃 8 个配置页与数十个繁琐选项，只需粘贴订阅或节点链接，点击唯一总开关即可畅享无缝网络。
 
@@ -19,7 +19,29 @@
 
 ## 🛠️ 安装与编译
 
-### 1. 源码编译 (OpenWrt SDK / Buildroot)
+### 1. 从 GitHub Releases 直接下载安装（推荐）
+
+前往 [Releases 页面](https://github.com/whatpig/luci-app-owall/releases/latest) 下载对应包格式的预编译包（同时提供 `.ipk` 与 `.apk`）：
+
+#### OpenWrt 21.02 ~ 24.10（`opkg` / `.ipk`）
+```bash
+opkg update
+opkg install sing-box v2ray-geoip v2ray-geosite kmod-nft-tproxy nftables
+opkg install luci-app-owall_*.ipk luci-i18n-owall-zh-cn_*.ipk
+```
+
+#### OpenWrt 25.12+ / Snapshot（`apk` / `.apk`）
+```bash
+apk update
+apk add sing-box v2ray-geoip v2ray-geosite kmod-nft-tproxy nftables
+apk add --allow-untrusted luci-app-owall-*.apk luci-i18n-owall-zh-cn-*.apk
+```
+
+### 2. GitHub Actions 自动构建发布
+
+进入仓库 **Actions -> Build & Release Owall (IPK + APK)**，点击 **Run workflow**，流水线会自动使用 OpenWrt `24.10.8` SDK（产出 `.ipk`）和 OpenWrt `25.12.6` SDK（产出 `.apk`）并行编译并发布至 GitHub Releases。
+
+### 3. 本地源码编译 (OpenWrt SDK / Buildroot)
 将本项目克隆到 OpenWrt 源码的 `package/` 目录：
 ```bash
 cd package/
@@ -28,14 +50,6 @@ cd ..
 ./scripts/feeds update -a && ./scripts/feeds install -a
 make menuconfig # 选中 LuCI -> Applications -> luci-app-owall
 make package/luci-app-owall/compile V=s
-```
-
-### 2. 路由器单包安装 (OPKG)
-将编译好的 `.ipk` 上传至路由器：
-```bash
-opkg update
-opkg install sing-box v2ray-geodata kmod-nft-tproxy nftables
-opkg install luci-app-owall_*.ipk
 ```
 
 ---

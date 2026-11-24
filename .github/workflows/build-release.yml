@@ -1,0 +1,174 @@
+name: Build & Release Owall (IPK + APK)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release Tag (leave empty to auto-use v<PKG_VERSION>-<PKG_RELEASE> from Makefile)'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  meta:
+    name: Resolve Version & Tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse Makefile version
+        id: ver
+        run: |
+          pkg_ver=$(awk -F ':=' '/^PKG_VERSION:=/{print $2}' Makefile | tr -d '\r ')
+          pkg_rel=$(awk -F ':=' '/^PKG_RELEASE:=/{print $2}' Makefile | tr -d '\r ')
+          ver="${pkg_ver}-${pkg_rel}"
+          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            tag="${{ github.event.inputs.release_tag }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            tag="${{ github.ref_name }}"
+          else
+            tag="v${ver}"
+          fi
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version=${ver}, tag=${tag}"
+
+  build:
+    name: Build ${{ matrix.pkg_type }} (OpenWrt ${{ matrix.sdk_ver }})
+    needs: meta
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pkg_type: ipk
+            sdk_ver: "24.10.8"
+            sdk_url: "https://downloads.openwrt.org/releases/24.10.8/targets/x86/64/openwrt-sdk-24.10.8-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+          - pkg_type: apk
+            sdk_ver: "25.12.6"
+            sdk_url: "https://downloads.openwrt.org/releases/25.12.6/targets/x86/64/openwrt-sdk-25.12.6-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
+    steps:
+      - name: Checkout luci-app-owall
+        uses: actions/checkout@v4
+        with:
+          path: src
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y build-essential ccache file gawk gettext git libncurses-dev libssl-dev \
+            python3 rsync swig unzip wget zlib1g-dev zstd
+
+      - name: Download & Prepare OpenWrt ${{ matrix.sdk_ver }} SDK
+        run: |
+          wget -q "${{ matrix.sdk_url }}" -O sdk.tar.zst
+          mkdir -p sdk
+          tar --zstd -xf sdk.tar.zst -C sdk --strip-components=1
+
+          cd sdk
+          sed -i \
+            -e 's|git\.openwrt\.org/feed|github.com/openwrt|g' \
+            -e 's|git\.openwrt\.org/project|github.com/openwrt|g' \
+            -e 's|git\.openwrt\.org/openwrt|github.com/openwrt|g' \
+            feeds.conf.default
+
+          # Only luci feed is required to build pure-Lua/Shell luci-app-owall + zh-cn i18n
+          ./scripts/feeds update luci
+          ./scripts/feeds install -a -p luci
+
+          # Place luci-app-owall directly into sdk/package/
+          mkdir -p package/luci-app-owall
+          rsync -a --exclude='.git' --exclude='.github' ../src/ package/luci-app-owall/
+
+      - name: Configure & Compile ${{ matrix.pkg_type }}
+        run: |
+          cd sdk
+          cat > .config << 'EOF'
+          CONFIG_ALL_NONSHARED=n
+          CONFIG_ALL_KMODS=n
+          CONFIG_ALL=n
+          CONFIG_AUTOREMOVE=n
+          CONFIG_LUCI_LANG_zh_Hans=y
+          CONFIG_PACKAGE_luci-app-owall=m
+          CONFIG_PACKAGE_luci-i18n-owall-zh-cn=m
+          EOF
+          make defconfig
+          make package/luci-app-owall/compile -j$(nproc) V=s
+
+      - name: Collect ${{ matrix.pkg_type }} artifacts
+        run: |
+          mkdir -p dist
+          find sdk/bin/packages -type f \( -name "luci-app-owall*.${{ matrix.pkg_type }}" -o -name "luci-i18n-owall*.${{ matrix.pkg_type }}" \) -exec cp -v {} dist/ \;
+          ls -la dist/
+          test -n "$(ls -A dist/)"
+
+      - name: Upload ${{ matrix.pkg_type }} artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: owall-${{ matrix.pkg_type }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download IPK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: owall-ipk
+          path: release-assets
+
+      - name: Download APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: owall-apk
+          path: release-assets
+
+      - name: Generate Release Notes
+        run: |
+          ls -lh release-assets/
+          cat > release-notes.md << 'EOF'
+          ## Owall (`luci-app-owall`) ${{ needs.meta.outputs.tag }}
+
+          OpenWrt 极简全自动透明代理插件（Sing-box + FakeDNS 0ms + nftables 国内硬件级硬直通）。
+
+          ### 包含安装包
+          - **IPK（适用于 OpenWrt 21.02 ~ 24.10 / opkg）**：`luci-app-owall_*.ipk` + `luci-i18n-owall-zh-cn_*.ipk`
+          - **APK（适用于 OpenWrt 25.12+ / Snapshot / apk）**：`luci-app-owall-*.apk` + `luci-i18n-owall-zh-cn-*.apk`
+
+          ### 快速安装
+          **OpenWrt 24.10 及以下 (`opkg`)：**
+          ```bash
+          opkg update
+          opkg install luci-app-owall_*.ipk luci-i18n-owall-zh-cn_*.ipk
+          ```
+
+          **OpenWrt 25.12+ / Snapshot (`apk`)：**
+          ```bash
+          apk update
+          apk add --allow-untrusted luci-app-owall-*.apk luci-i18n-owall-zh-cn-*.apk
+          ```
+          EOF
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: "Owall ${{ needs.meta.outputs.tag }}"
+          body_path: release-notes.md
+          files: release-assets/*
+          make_latest: true
