@@ -26,7 +26,7 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Parse Makefile version
         id: ver
@@ -61,7 +61,7 @@ jobs:
             sdk_url: "https://downloads.openwrt.org/releases/25.12.6/targets/x86/64/openwrt-sdk-25.12.6-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
     steps:
       - name: Checkout luci-app-owall
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: src
 
@@ -117,7 +117,7 @@ jobs:
           test -n "$(ls -A dist/)"
 
       - name: Upload ${{ matrix.pkg_type }} artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: owall-${{ matrix.pkg_type }}
           path: dist/*
@@ -129,13 +129,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download IPK artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: owall-ipk
           path: release-assets
 
       - name: Download APK artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: owall-apk
           path: release-assets
@@ -167,7 +167,7 @@ jobs:
           EOF
 
       - name: Create or Update GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.meta.outputs.tag }}
           name: "Owall ${{ needs.meta.outputs.tag }}"
