@@ -1,0 +1,11 @@
+
+config global 'global'
+	option enabled '0'
+	option node_input ''
+	option active_node ''
+	option tproxy_port '1081'
+	option socks_port '1080'
+	option dns_port '5335'
+	option auto_switch '1'
+
+# Parsed nodes will be automatically populated below by owall-parser

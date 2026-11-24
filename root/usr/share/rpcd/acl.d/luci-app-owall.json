@@ -1,0 +1,15 @@
+{
+	"luci-app-owall": {
+		"description": "Grant UCI and system access for luci-app-owall",
+		"read": {
+			"uci": [ "owall" ],
+			"file": {
+				"/var/log/owall.log": [ "read" ],
+				"/tmp/owall_status.json": [ "read" ]
+			}
+		},
+		"write": {
+			"uci": [ "owall" ]
+		}
+	}
+}

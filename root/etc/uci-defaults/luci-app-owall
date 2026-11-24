@@ -1,0 +1,13 @@
+#!/bin/sh
+
+uci -q get ucitrack.@owall[0] >/dev/null || {
+	uci -q add ucitrack owall >/dev/null
+	uci -q set ucitrack.@owall[-1].init="owall"
+	uci -q commit ucitrack
+}
+
+chmod +x /etc/init.d/owall
+chmod +x /usr/share/owall/*.sh
+chmod +x /usr/share/owall/*.lua 2>/dev/null || true
+
+exit 0

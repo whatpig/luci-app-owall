@@ -1,0 +1,32 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Owall"
+msgstr "Owall 极简代理"
+
+msgid "Ultra-Lightweight, Zero-Config Transparent Proxy for OpenWrt."
+msgstr "OpenWrt 极简全自动透明代理，零多余配置，一键即用。"
+
+msgid "Core Control"
+msgstr "核心控制"
+
+msgid "Master Switch"
+msgstr "总开关"
+
+msgid "Toggle to start/stop transparent proxy and DNS routing."
+msgstr "开启或关闭透明代理与国内外分流路由。"
+
+msgid "Import Subscription / Nodes"
+msgstr "导入订阅或节点链接"
+
+msgid "Paste your Subscription URL (http/https) or node share links (vless://, hysteria2://, trojan://, ss://, vmess://) here.<br/>Multiple lines supported. Automatically parsed on Save & Apply."
+msgstr "在此粘贴订阅链接（http/https）或单节点分享链接（支持 vless://, hysteria2://, trojan://, ss://, vmess://）。<br/>支持多行粘贴，点击“保存并应用”后后台全自动解析。"
+
+msgid "Active Outbound Node"
+msgstr "当前出口节点"
+
+msgid "Select active node or keep Auto-Select (lowest latency)."
+msgstr "可手动指定出口节点，或保持自动选择（最低延迟）。"
+
+msgid "Auto-Select (Lowest Latency)"
+msgstr "自动选择（最低延迟最优节点）"
