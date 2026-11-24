@@ -19,6 +19,9 @@ msgstr "检测中..."
 msgid "RUNNING"
 msgstr "运行中"
 
+msgid "RUNNING (Firewall Not Loaded)"
+msgstr "运行中（透明代理规则未生效）"
+
 msgid "STOPPED"
 msgstr "已停止"
 

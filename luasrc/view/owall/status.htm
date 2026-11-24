@@ -92,6 +92,7 @@
 <script type="text/javascript">//<![CDATA[
 var OWALL_I18N = {
 	running: '<%:RUNNING%>',
+	runningNoFw: '<%:RUNNING (Firewall Not Loaded)%>',
 	stopped: '<%:STOPPED%>',
 	none: '<%:None%>',
 	timeout: '<%:Timeout%>',
@@ -105,9 +106,13 @@ function renderOwallStatus(info) {
 
 	var runEl = document.getElementById('owall-run-status');
 	if (runEl) {
-		runEl.innerHTML = info.running
-			? '<span class="badge-run">' + OWALL_I18N.running + '</span>'
-			: '<span class="badge-stop">' + OWALL_I18N.stopped + '</span>';
+		if (info.running && info.fw_ok) {
+			runEl.innerHTML = '<span class="badge-run">' + OWALL_I18N.running + '</span>';
+		} else if (info.running) {
+			runEl.innerHTML = '<span class="badge-stop">' + OWALL_I18N.runningNoFw + '</span>';
+		} else {
+			runEl.innerHTML = '<span class="badge-stop">' + OWALL_I18N.stopped + '</span>';
+		}
 	}
 
 	var nodeEl = document.getElementById('owall-node-status');
@@ -127,7 +132,7 @@ function renderOwallStatus(info) {
 
 	var logEl = document.getElementById('owall-last-log');
 	if (logEl) {
-		if (!info.running && info.last_log) {
+		if ((!info.running || !info.fw_ok) && info.last_log) {
 			logEl.textContent = OWALL_I18N.logPrefix + ' ' + info.last_log;
 			logEl.style.display = 'block';
 		} else {

@@ -69,6 +69,11 @@ check_status() {
 		running=1
 	fi
 
+	local fw_ok=0
+	if nft list table inet owall >/dev/null 2>&1 || iptables -t mangle -L OWALL >/dev/null 2>&1; then
+		fw_ok=1
+	fi
+
 	local google_ok=0
 	if [ "$running" -eq 1 ]; then
 		local code=$(curl -s -o /dev/null -w "%{http_code}" -k -m 5 --socks5-hostname 127.0.0.1:1080 https://www.google.com/generate_204 2>/dev/null)
@@ -86,6 +91,7 @@ check_status() {
 	cat <<-EOF > "$STATUS_FILE"
 		{
 			"running": $running,
+			"fw_ok": $fw_ok,
 			"active_node": "$active_node",
 			"remarks": "$esc_remarks",
 			"latency": "$latency",
