@@ -21,19 +21,19 @@
 
 ### 1. 从 GitHub Releases 直接下载安装（推荐）
 
-前往 [Releases 页面](https://github.com/whatpig/luci-app-owall/releases/latest) 下载对应包格式的预编译包（同时提供 `.ipk` 与 `.apk`）：
+前往 [Releases 页面](https://github.com/whatpig/luci-app-owall/releases/latest) 下载对应包格式的预编译包（支持 OpenWrt 22.03+ / fw4 `nftables`，同时提供 `.ipk` 与 `.apk`，包管理器会自动解析并安装全部依赖）：
 
-#### OpenWrt 21.02 ~ 24.10（`opkg` / `.ipk`）
+#### OpenWrt 22.03 ~ 24.10（`opkg` / `.ipk`，fw4 nftables）
 ```bash
 opkg update
-opkg install xray-core v2ray-geoip v2ray-geosite kmod-nft-tproxy nftables
+opkg install xray-core v2ray-geoip v2ray-geosite kmod-nft-tproxy kmod-nft-socket kmod-nft-nat nftables
 opkg install luci-app-owall_*.ipk luci-i18n-owall-zh-cn_*.ipk
 ```
 
-#### OpenWrt 25.12+ / Snapshot（`apk` / `.apk`）
+#### OpenWrt 25.12+ / Snapshot（`apk` / `.apk`，fw4 nftables）
 ```bash
 apk update
-apk add xray-core v2ray-geoip v2ray-geosite kmod-nft-tproxy nftables
+apk add xray-core v2ray-geoip v2ray-geosite kmod-nft-tproxy kmod-nft-socket kmod-nft-nat nftables
 apk add --allow-untrusted luci-app-owall-*.apk luci-i18n-owall-zh-cn-*.apk
 ```
 

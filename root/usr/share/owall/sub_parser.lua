@@ -35,11 +35,24 @@ local function strip_quotes(s)
 	return s
 end
 
+local function nonempty(...)
+	for i = 1, select("#", ...) do
+		local v = select(i, ...)
+		if v ~= nil and v ~= "" then
+			return v
+		end
+	end
+	return ""
+end
+
 local function parse_query(qs)
 	local t = {}
 	if not qs or qs == "" then return t end
-	for k, v in qs:gmatch("([^&=?]+)=([^&=?]*)") do
-		t[k] = urldecode(v)
+	for pair in qs:gmatch("[^&]+") do
+		local k, v = pair:match("^([^=]+)=(.*)$")
+		if k then
+			t[k] = urldecode(v)
+		end
 	end
 	return t
 end
@@ -60,24 +73,24 @@ local function parse_vless(link)
 	local q = parse_query(qs)
 	return {
 		type = "vless",
-		remarks = urldecode(remarks ~= "" and remarks or (host .. ":" .. port)),
+		remarks = urldecode(nonempty(remarks, host .. ":" .. port)),
 		address = host,
 		port = port,
 		uuid = urldecode(user),
-		flow = q.flow or "",
-		encryption = q.encryption or "none",
-		security = q.security or "none",
-		sni = q.sni or q.host or host,
-		host = q.host or q.sni or host,
-		alpn = q.alpn or "",
-		fp = q.fp or "chrome",
-		pbk = q.pbk or "",
-		sid = q.sid or "",
-		spx = q.spx or "/",
-		network = q.type or "tcp",
-		path = q.path or "/",
-		mode = q.mode or "auto",
-		serviceName = q.serviceName or ""
+		flow = nonempty(q.flow),
+		encryption = nonempty(q.encryption, "none"),
+		security = nonempty(q.security, "none"),
+		sni = nonempty(q.sni, q.host, host),
+		host = nonempty(q.host, q.sni, host),
+		alpn = nonempty(q.alpn),
+		fp = nonempty(q.fp, "chrome"),
+		pbk = nonempty(q.pbk),
+		sid = nonempty(q.sid),
+		spx = nonempty(q.spx, "/"),
+		network = nonempty(q.type, "tcp"),
+		path = nonempty(q.path, "/"),
+		mode = nonempty(q.mode, "auto"),
+		serviceName = nonempty(q.serviceName)
 	}
 end
 
@@ -90,20 +103,20 @@ local function parse_trojan(link)
 	local q = parse_query(qs)
 	return {
 		type = "trojan",
-		remarks = urldecode(remarks ~= "" and remarks or (host .. ":" .. port)),
+		remarks = urldecode(nonempty(remarks, host .. ":" .. port)),
 		address = host,
 		port = port,
 		password = urldecode(user),
-		security = q.security or "tls",
-		sni = q.sni or q.peer or q.host or host,
-		host = q.host or q.sni or host,
-		alpn = q.alpn or "",
-		fp = q.fp or "chrome",
-		pbk = q.pbk or "",
-		sid = q.sid or "",
-		network = q.type or "tcp",
-		path = q.path or "/",
-		serviceName = q.serviceName or ""
+		security = nonempty(q.security, "tls"),
+		sni = nonempty(q.sni, q.peer, q.host, host),
+		host = nonempty(q.host, q.sni, host),
+		alpn = nonempty(q.alpn),
+		fp = nonempty(q.fp, "chrome"),
+		pbk = nonempty(q.pbk),
+		sid = nonempty(q.sid),
+		network = nonempty(q.type, "tcp"),
+		path = nonempty(q.path, "/"),
+		serviceName = nonempty(q.serviceName)
 	}
 end
 
@@ -130,7 +143,7 @@ local function parse_ss(link)
 	if not method then return nil end
 	return {
 		type = "shadowsocks",
-		remarks = remarks ~= "" and remarks or (host .. ":" .. port),
+		remarks = nonempty(remarks, host .. ":" .. port),
 		address = host,
 		port = port,
 		method = method,
@@ -146,17 +159,17 @@ local function parse_vmess(link)
 	if not info or not info.add or not info.port then return nil end
 	return {
 		type = "vmess",
-		remarks = info.ps or (info.add .. ":" .. info.port),
+		remarks = nonempty(info.ps, info.add .. ":" .. info.port),
 		address = info.add,
 		port = tostring(info.port),
 		uuid = info.id,
 		alterId = tostring(info.aid or 0),
 		security = (info.tls == "tls") and "tls" or "none",
-		network = info.net or "tcp",
-		sni = info.sni or info.host or info.add,
-		host = info.host or info.sni or info.add,
-		path = info.path or "/",
-		fp = info.fp or "chrome"
+		network = nonempty(info.net, "tcp"),
+		sni = nonempty(info.sni, info.host, info.add),
+		host = nonempty(info.host, info.sni, info.add),
+		path = nonempty(info.path, "/"),
+		fp = nonempty(info.fp, "chrome")
 	}
 end
 
@@ -172,12 +185,12 @@ local function parse_hysteria2(link)
 	local q = parse_query(qs)
 	return {
 		type = "hysteria2",
-		remarks = urldecode(remarks ~= "" and remarks or (host .. ":" .. port)),
+		remarks = urldecode(nonempty(remarks, host .. ":" .. port)),
 		address = host,
 		port = port,
 		password = urldecode(user),
-		sni = q.sni or host,
-		insecure = q.insecure == "1" and "1" or "0"
+		sni = nonempty(q.sni, host),
+		insecure = (q.insecure == "1" or q.insecure == "true") and "1" or "0"
 	}
 end
 
@@ -244,11 +257,11 @@ local function parse_clash_inline(line)
 	local port = m.port and tostring(m.port):match("^(%d+)$")
 	if not host or host == "" or not port then return nil end
 
-	local remarks = (m.name and m.name ~= "") and m.name or (host .. ":" .. port)
-	local sni = m.sni or m.servername or host
+	local remarks = nonempty(m.name, host .. ":" .. port)
+	local sni = nonempty(m.sni, m.servername, host)
 	local insecure = (m["skip-cert-verify"] == "true") and "1" or "0"
-	local fp = m["client-fingerprint"] or "chrome"
-	local net = m.network or "tcp"
+	local fp = nonempty(m["client-fingerprint"], "chrome")
+	local net = nonempty(m.network, "tcp")
 
 	if t == "vless" and m.uuid then
 		local sec = "none"
@@ -263,18 +276,18 @@ local function parse_clash_inline(line)
 			address = host,
 			port = port,
 			uuid = m.uuid,
-			flow = m.flow or "",
+			flow = nonempty(m.flow),
 			encryption = "none",
 			security = sec,
 			sni = sni,
-			host = m.host or sni,
+			host = nonempty(m.host, sni),
 			fp = fp,
-			pbk = m["public-key"] or "",
-			sid = m["short-id"] or "",
+			pbk = nonempty(m["public-key"]),
+			sid = nonempty(m["short-id"]),
 			spx = "/",
 			network = net,
-			path = m.path or "/",
-			serviceName = m["grpc-service-name"] or m.servicename or "",
+			path = nonempty(m.path, "/"),
+			serviceName = nonempty(m["grpc-service-name"], m.servicename),
 			insecure = insecure
 		}
 	elseif t == "trojan" and m.password then
@@ -286,13 +299,13 @@ local function parse_clash_inline(line)
 			password = m.password,
 			security = (m["public-key"] and m["public-key"] ~= "") and "reality" or "tls",
 			sni = sni,
-			host = m.host or sni,
+			host = nonempty(m.host, sni),
 			fp = fp,
-			pbk = m["public-key"] or "",
-			sid = m["short-id"] or "",
+			pbk = nonempty(m["public-key"]),
+			sid = nonempty(m["short-id"]),
 			network = net,
-			path = m.path or "/",
-			serviceName = m["grpc-service-name"] or m.servicename or "",
+			path = nonempty(m.path, "/"),
+			serviceName = nonempty(m["grpc-service-name"], m.servicename),
 			insecure = insecure
 		}
 	elseif t == "ss" and m.cipher and m.password then
@@ -315,8 +328,8 @@ local function parse_clash_inline(line)
 			security = (m.tls == "true") and "tls" or "none",
 			network = net,
 			sni = sni,
-			host = m.host or sni,
-			path = m.path or "/",
+			host = nonempty(m.host, sni),
+			path = nonempty(m.path, "/"),
 			fp = fp,
 			insecure = insecure
 		}
@@ -433,11 +446,16 @@ local function run()
 		print(string.format("[sub_parser] Successfully parsed and imported %d nodes.", count))
 		local active = uci:get(CONFIG, "global", "active_node")
 		if not active or active == "" or not uci:get(CONFIG, active) then
-			uci:set(CONFIG, "global", "active_node", first_node_id)
+			if count == 1 then
+				uci:set(CONFIG, "global", "active_node", first_node_id)
+			else
+				uci:delete(CONFIG, "global", "active_node")
+			end
 		end
 		uci:commit(CONFIG)
 	else
 		print("[sub_parser] ERROR: No valid nodes could be parsed from input.")
+		os.exit(1)
 	end
 end
 

@@ -40,12 +40,32 @@ test_node() {
 
 auto_select_best() {
 	local skip_node="$1"
+	local no_restart="$2"
 	local best_node=""
 	local min_latency=9999
 	local fallback_lat=9999
 
-	for section in $(uci -q show owall | grep "=nodes" | cut -d'.' -f2 | cut -d'=' -f1); do
-		local lat=$(test_node "$section")
+	local tmp_dir="/tmp/owall_lat.$$"
+	mkdir -p "$tmp_dir"
+	local sections=$(uci -q show owall | grep "=nodes" | cut -d'.' -f2 | cut -d'=' -f1)
+	local jobs=0
+	local section
+	for section in $sections; do
+		(
+			lat=$(test_node "$section")
+			echo "$lat" > "$tmp_dir/$section"
+		) &
+		jobs=$((jobs + 1))
+		if [ "$jobs" -ge 16 ]; then
+			wait
+			jobs=0
+		fi
+	done
+	wait
+
+	for section in $sections; do
+		local lat=$(cat "$tmp_dir/$section" 2>/dev/null || echo 9999)
+		[ -n "$lat" ] || lat=9999
 		if [ "$section" = "$skip_node" ]; then
 			fallback_lat="$lat"
 			continue
@@ -55,6 +75,7 @@ auto_select_best() {
 			best_node="$section"
 		fi
 	done
+	rm -rf "$tmp_dir"
 
 	if [ -z "$best_node" ] && [ -n "$skip_node" ] && [ "$fallback_lat" -lt 9999 ] && [ "$fallback_lat" -gt 0 ]; then
 		best_node="$skip_node"
@@ -68,7 +89,7 @@ auto_select_best() {
 			uci -q commit owall
 			rm -f "$STATUS_FILE"
 			echo "Best node selected: $best_node ($min_latency ms)"
-			if is_owall_running; then
+			if [ "$no_restart" != "no_restart" ] && is_owall_running; then
 				/etc/init.d/owall restart >/dev/null 2>&1
 			fi
 		else
@@ -84,7 +105,8 @@ watchdog() {
 		local auto_sw=$(uci -q get owall.global.auto_switch)
 		[ "$enabled" = "1" ] && [ "$auto_sw" = "1" ] || continue
 
-		local node_count=$(uci -q show owall | grep -c "=nodes" 2>/dev/null || echo 0)
+		local node_count=$(uci -q show owall | grep -c "=nodes" 2>/dev/null || true)
+		node_count=${node_count:-0}
 		[ "$node_count" -ge 2 ] || continue
 
 		is_owall_running || continue
@@ -137,7 +159,7 @@ check_status() {
 	is_owall_running && running=1
 
 	local fw_ok=0
-	if nft list table inet owall >/dev/null 2>&1 || iptables -t mangle -L OWALL >/dev/null 2>&1; then
+	if nft list table inet owall >/dev/null 2>&1; then
 		fw_ok=1
 	fi
 
@@ -172,6 +194,7 @@ check_status() {
 
 case "$1" in
 	auto) auto_select_best ;;
+	select_best) auto_select_best "" "no_restart" ;;
 	watchdog) watchdog ;;
 	status) check_status "$2" ;;
 	test) test_node "$2" ;;

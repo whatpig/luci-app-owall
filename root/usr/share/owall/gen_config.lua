@@ -108,12 +108,9 @@ local function build_stream_settings(node)
 end
 
 local function build_proxy_outbound(node)
-	if not node or not node.address or not node.port then
-		return {
-			tag = "proxy",
-			protocol = "freedom",
-			streamSettings = { sockopt = { mark = 255 } }
-		}
+	if not node or not node.address or node.address == "" or not node.port or not tonumber(node.port) then
+		print("[gen_config] ERROR: No valid proxy node configured. Please import a subscription or node link.")
+		os.exit(1)
 	end
 
 	local t = node.type
@@ -224,11 +221,8 @@ local function build_proxy_outbound(node)
 		}
 	end
 
-	return {
-		tag = "proxy",
-		protocol = "freedom",
-		streamSettings = { sockopt = { mark = 255 } }
-	}
+	print("[gen_config] ERROR: Unsupported proxy node protocol: " .. tostring(t))
+	os.exit(1)
 end
 
 local function find_first_node()
@@ -252,6 +246,10 @@ local function generate()
 	end
 
 	local node = active_id and uci:get_all(CONFIG, active_id) or nil
+	if not node or not node.address or node.address == "" or not node.port or not tonumber(node.port) then
+		print("[gen_config] ERROR: No valid proxy node configured. Please import a subscription or node link.")
+		os.exit(1)
+	end
 	local tproxy_port = tonumber(uci:get(CONFIG, "global", "tproxy_port")) or 1081
 	local socks_port = tonumber(uci:get(CONFIG, "global", "socks_port")) or 1080
 	local dns_port = tonumber(uci:get(CONFIG, "global", "dns_port")) or 5335

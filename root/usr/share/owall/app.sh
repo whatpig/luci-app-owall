@@ -20,10 +20,6 @@ detect_asset_dir() {
 
 export XRAY_LOCATION_ASSET="$(detect_asset_dir)"
 
-has_nft() {
-	command -v nft >/dev/null 2>&1
-}
-
 get_owall_pids() {
 	ps w 2>/dev/null | grep "[/ ]var/etc/owall.json" | awk '{print $1}'
 }
@@ -37,7 +33,8 @@ ensure_china_ip() {
 	fi
 
 	if [ -f "$CHINA_IP_FILE" ]; then
-		local cnt=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$CHINA_IP_FILE" 2>/dev/null || echo 0)
+		local cnt=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$CHINA_IP_FILE" 2>/dev/null || true)
+		cnt=${cnt:-0}
 		local now=$(date +%s)
 		local mtime=$(date -r "$CHINA_IP_FILE" +%s 2>/dev/null)
 		if [ "$cnt" -ge 500 ] && [ -n "$mtime" ] && [ $((now - mtime)) -lt 604800 ]; then
@@ -50,7 +47,8 @@ ensure_china_ip() {
 	local url
 	for url in "https://ispip.clang.cn/all_cn.txt" "https://cdn.jsdelivr.net/gh/gaoyifan/china-operator-ip@ip-lists/china.txt"; do
 		curl -sL --connect-timeout 5 -m 15 -A 'Owall/1.2' "$url" -o "$tmp_file" 2>/dev/null || continue
-		local cnt=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$tmp_file" 2>/dev/null || echo 0)
+		local cnt=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$tmp_file" 2>/dev/null || true)
+		cnt=${cnt:-0}
 		if [ "$cnt" -ge 500 ]; then
 			grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$tmp_file" > "${CHINA_IP_FILE}.tmp.$$"
 			mv -f "${CHINA_IP_FILE}.tmp.$$" "$CHINA_IP_FILE"
@@ -66,18 +64,15 @@ ensure_china_ip() {
 }
 
 start_firewall() {
-	if has_nft; then
-		/usr/share/owall/nftables.sh start
-	else
-		/usr/share/owall/iptables.sh start
+	if ! command -v nft >/dev/null 2>&1; then
+		echo "[app] ERROR: nft (nftables / fw4) not found!"
+		return 1
 	fi
+	/usr/share/owall/nftables.sh start
 }
 
 stop_firewall() {
-	if has_nft; then
-		/usr/share/owall/nftables.sh stop
-	fi
-	/usr/share/owall/iptables.sh stop
+	command -v nft >/dev/null 2>&1 && /usr/share/owall/nftables.sh stop
 }
 
 sync_nodes() {
@@ -107,6 +102,16 @@ prepare() {
 	fi
 
 	sync_nodes "$1" || return 1
+
+	local active_node=$(uci -q get owall.global.active_node)
+	if [ -z "$active_node" ] || ! uci -q get "owall.${active_node}" >/dev/null 2>&1; then
+		local node_count=$(uci -q show owall | grep -c "=nodes" 2>/dev/null || true)
+		node_count=${node_count:-0}
+		if [ "$node_count" -ge 2 ]; then
+			/usr/share/owall/url_test.sh select_best
+		fi
+	fi
+
 	ensure_china_ip
 	lua /usr/share/owall/gen_config.lua || return 1
 
@@ -134,10 +139,28 @@ kill_all() {
 
 reload() {
 	mkdir -p /var/lock
-	(
-		flock -n 9 || exit 0
+	if command -v flock >/dev/null 2>&1; then
+		(
+			flock -n 9 || exit 0
+			/etc/init.d/owall restart
+		) 9>"$LOCK_FILE"
+	else
+		local lock_dir="/var/lock/owall.lock.d"
+		if ! mkdir "$lock_dir" 2>/dev/null; then
+			local now=$(date +%s)
+			local mtime=$(date -r "$lock_dir" +%s 2>/dev/null || echo 0)
+			if [ "$mtime" -gt 0 ] && [ $((now - mtime)) -gt 60 ]; then
+				rmdir "$lock_dir" 2>/dev/null || true
+				mkdir "$lock_dir" 2>/dev/null || return 0
+			else
+				return 0
+			fi
+		fi
+		trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT INT TERM
 		/etc/init.d/owall restart
-	) 9>"$LOCK_FILE"
+		rmdir "$lock_dir" 2>/dev/null || true
+		trap - EXIT INT TERM
+	fi
 }
 
 case "$1" in
