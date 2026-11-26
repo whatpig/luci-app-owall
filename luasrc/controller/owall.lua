@@ -85,6 +85,12 @@ function action_upgrade_log()
 			st.target = parsed.target or ""
 		end
 	end
+	if st.running and not fs.stat("/var/lock/owall_upgrade.lock.d") then
+		st.running = false
+		if st.result == "running" or st.result == "" then
+			st.result = "error"
+		end
+	end
 	st.log = fs.readfile("/tmp/owall_upgrade.log") or ""
 	luci.http.prepare_content("application/json")
 	luci.http.write(jsonc.stringify(st))

@@ -1,10 +1,10 @@
 #!/bin/sh
 
 [ "$ACTION" = "ifup" ] || exit 0
-[ "$INTERFACE" = "wan" ] || [ "$INTERFACE" = "wan6" ] || exit 0
+[ "$INTERFACE" = "wan" ] || exit 0
 
 enabled=$(uci -q get owall.global.enabled)
 [ "$enabled" = "1" ] || exit 0
 
-# Refresh local WAN IP bypass in firewall after PPPoE/DHCP redial
+# Refresh local WAN IPv4 bypass in firewall after PPPoE/DHCP redial
 /usr/share/owall/app.sh start_firewall >/dev/null 2>&1 &

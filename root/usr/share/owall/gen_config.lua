@@ -24,13 +24,27 @@ local function has_geo_files()
 	return false, "/usr/share/v2ray"
 end
 
+local function is_private_or_foreign_dns(ip)
+	local a, b = ip:match("^(%d+)%.(%d+)%.%d+%.%d+$")
+	a, b = tonumber(a), tonumber(b)
+	if not a or not b then return true end
+	if a == 0 or a == 10 or a == 127 then return true end
+	if a == 192 and b == 168 then return true end
+	if a == 172 and b >= 16 and b <= 31 then return true end
+	if a == 100 and b >= 64 and b <= 127 then return true end
+	if ip == "8.8.8.8" or ip == "8.8.4.4" or ip == "1.1.1.1" or ip == "1.0.0.1" or ip == "9.9.9.9" then
+		return true
+	end
+	return false
+end
+
 local function get_system_dns()
 	local dns = "223.5.5.5"
 	local f = io.open("/tmp/resolv.conf.d/resolv.conf.auto", "r") or io.open("/tmp/resolv.conf.auto", "r")
 	if f then
 		for line in f:lines() do
 			local ip = line:match("^nameserver%s+([%d%.]+)")
-			if ip and ip ~= "127.0.0.1" and not ip:find("^192%.168%.") and not ip:find("^10%.") then
+			if ip and not is_private_or_foreign_dns(ip) then
 				dns = ip
 				break
 			end
@@ -38,6 +52,23 @@ local function get_system_dns()
 		f:close()
 	end
 	return dns
+end
+
+local function get_dnsmasq_port()
+	local port = 53
+	local done = false
+	uci:foreach("dhcp", "dnsmasq", function(s)
+		if not done and s.port ~= nil then
+			local n = tonumber(s.port)
+			if n == 0 then
+				port = nil
+			elseif n then
+				port = n
+			end
+			done = true
+		end
+	end)
+	return port
 end
 
 local function build_stream_settings(node)
@@ -255,21 +286,37 @@ local function generate()
 	local dns_port = tonumber(uci:get(CONFIG, "global", "dns_port")) or 5335
 
 	local local_dns = get_system_dns()
+	local dnsmasq_port = get_dnsmasq_port()
 	local proxy_outbound = build_proxy_outbound(node)
 	local geo_ok = has_geo_files()
 
 	-- Build DNS servers:
 	-- servers[1] MUST be "fakedns" so all foreign / unmatched domains get Fake-IP (0ms, zero DNS leak).
-	-- servers[2] is local direct DNS strictly scoped to VPS host + geosite:private + geosite:cn + custom direct domains with skipFallback=true.
+	-- LAN hostnames (.lan + private) go to local Dnsmasq (127.0.0.1) so internal DHCP hosts resolve.
+	-- VPS host + geosite:cn + custom direct domains go to domestic DNS with skipFallback=true.
 	local dns_servers = { "fakedns" }
+	local lan_domains = { "domain:lan" }
 	local direct_domains = {}
 	local custom_direct_domains = {}
+
+	if dnsmasq_port then
+		if geo_ok then
+			table.insert(lan_domains, "geosite:private")
+		end
+		table.insert(dns_servers, {
+			address = "127.0.0.1",
+			port = dnsmasq_port,
+			domains = lan_domains,
+			skipFallback = true
+		})
+	elseif geo_ok then
+		table.insert(direct_domains, "geosite:private")
+	end
 
 	if node and node.address and not is_ip(node.address) then
 		table.insert(direct_domains, "full:" .. node.address:lower())
 	end
 	if geo_ok then
-		table.insert(direct_domains, "geosite:private")
 		table.insert(direct_domains, "geosite:cn")
 	end
 
@@ -362,7 +409,7 @@ local function generate()
 			},
 			{
 				tag = "socks-in",
-				listen = "0.0.0.0",
+				listen = "127.0.0.1",
 				port = socks_port,
 				protocol = "socks",
 				settings = {

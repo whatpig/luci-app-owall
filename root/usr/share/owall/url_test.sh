@@ -18,11 +18,31 @@ test_node() {
 	local node_id="$1"
 	[ -z "$node_id" ] && { echo 9999; return; }
 
+	local ntype=$(uci -q get owall.${node_id}.type)
 	local addr=$(uci -q get owall.${node_id}.address)
 	local port=$(uci -q get owall.${node_id}.port)
 	[ -z "$addr" ] || [ -z "$port" ] && { echo 9999; return; }
 
 	local latency=9999
+	if [ "$ntype" = "hysteria2" ]; then
+		# Hysteria2 uses QUIC/UDP; measure ICMP RTT instead of TCP handshake
+		local ping_ms=$(ping -c 1 -W 2 "$addr" 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p' | head -n1)
+		if [ -n "$ping_ms" ]; then
+			latency=$(awk -v ms="$ping_ms" 'BEGIN{v=int(ms+0.5); print (v>0?v:1)}')
+		fi
+		if [ "$latency" = "9999" ] && is_owall_running; then
+			local cur=$(uci -q get owall.global.active_node)
+			if [ "$cur" = "$node_id" ]; then
+				local socks_port=$(uci -q get owall.global.socks_port || echo 1080)
+				[ -n "$socks_port" ] || socks_port=1080
+				local raw=$(curl -s -o /dev/null -k --connect-timeout 3 -m 4 --socks5-hostname "127.0.0.1:${socks_port}" -w "%{time_starttransfer}" https://www.google.com/generate_204 2>/dev/null || true)
+				latency=$(awk -v t="${raw:-0}" 'BEGIN{ms=int(t*1000+0.5); print (ms>0?ms:9999)}')
+			fi
+		fi
+		echo "${latency:-9999}"
+		return
+	fi
+
 	if command -v tcping >/dev/null 2>&1; then
 		latency=$(tcping -q -c 1 -t 2 "$addr" "$port" 2>/dev/null | awk -F'/' '{print $4}' | cut -d'.' -f1)
 	fi
@@ -145,6 +165,20 @@ check_status() {
 		fi
 	fi
 
+	local st_lock="/var/lock/owall_status.lock.d"
+	mkdir -p /var/lock
+	if ! mkdir "$st_lock" 2>/dev/null; then
+		local now=$(date +%s)
+		local mtime=$(date -r "$st_lock" +%s 2>/dev/null || echo 0)
+		if [ "$mtime" -gt 0 ] && [ $((now - mtime)) -gt 15 ]; then
+			rmdir "$st_lock" 2>/dev/null || true
+			mkdir "$st_lock" 2>/dev/null || { [ -f "$STATUS_FILE" ] && return 0; }
+		elif [ -f "$STATUS_FILE" ]; then
+			return 0
+		fi
+	fi
+	trap 'rmdir "$st_lock" 2>/dev/null || true' EXIT INT TERM
+
 	local active_node=$(uci -q get owall.global.active_node)
 	local socks_port=$(uci -q get owall.global.socks_port || echo 1080)
 	local remarks="None"
@@ -190,6 +224,8 @@ check_status() {
 		}
 	EOF
 	mv -f "$tmp_file" "$STATUS_FILE"
+	rmdir "$st_lock" 2>/dev/null || true
+	trap - EXIT INT TERM
 }
 
 case "$1" in

@@ -94,6 +94,32 @@ detect_xray_arch() {
 	esac
 }
 
+_curl_try() {
+	local use_proxy="$1"
+	local url="$2"
+	local out_file="$3"
+	local timeout="$4"
+	local socks_port="$5"
+
+	local rc=0
+	if [ "$use_proxy" = "1" ]; then
+		curl -fsSL --connect-timeout 8 -m "$timeout" --socks5-hostname "127.0.0.1:${socks_port}" -A 'Owall-Updater/1.3' "$url" -o "$out_file" 2>/dev/null || rc=$?
+		[ "$rc" -eq 0 ] && return 0
+		# Retry with -k only when local firmware lacks root CA bundle (cert error)
+		if [ "$rc" -eq 35 ] || [ "$rc" -eq 51 ] || [ "$rc" -eq 60 ] || [ "$rc" -eq 77 ]; then
+			curl -fsSL -k --connect-timeout 8 -m "$timeout" --socks5-hostname "127.0.0.1:${socks_port}" -A 'Owall-Updater/1.3' "$url" -o "$out_file" 2>/dev/null && return 0
+		fi
+		return 1
+	fi
+
+	curl -fsSL --connect-timeout 8 -m "$timeout" -A 'Owall-Updater/1.3' "$url" -o "$out_file" 2>/dev/null || rc=$?
+	[ "$rc" -eq 0 ] && return 0
+	if [ "$rc" -eq 35 ] || [ "$rc" -eq 51 ] || [ "$rc" -eq 60 ] || [ "$rc" -eq 77 ]; then
+		curl -fsSL -k --connect-timeout 8 -m "$timeout" -A 'Owall-Updater/1.3' "$url" -o "$out_file" 2>/dev/null && return 0
+	fi
+	return 1
+}
+
 curl_fetch() {
 	local url="$1"
 	local out_file="$2"
@@ -102,12 +128,10 @@ curl_fetch() {
 	[ -n "$socks_port" ] || socks_port=1080
 
 	if is_owall_running; then
-		if curl -fsSL -k --connect-timeout 8 -m "$timeout" --socks5-hostname "127.0.0.1:${socks_port}" -A 'Owall-Updater/1.3' "$url" -o "$out_file" 2>/dev/null; then
-			return 0
-		fi
+		_curl_try 1 "$url" "$out_file" "$timeout" "$socks_port" && return 0
 	fi
 
-	curl -fsSL -k --connect-timeout 8 -m "$timeout" -A 'Owall-Updater/1.3' "$url" -o "$out_file" 2>/dev/null
+	_curl_try 0 "$url" "$out_file" "$timeout" "$socks_port"
 }
 
 parse_release_json() {
@@ -357,9 +381,21 @@ verify_geo_sha256() {
 	if [ ! -s "$sum_file" ] || ! command -v sha256sum >/dev/null 2>&1; then
 		return 0
 	fi
-	local expected=$(awk 'NR==1{print $1}' "$sum_file" | tr -d '\r ')
+	local expected=$(awk 'NR==1{print tolower($1)}' "$sum_file" | tr -d '\r ')
 	[ -n "$expected" ] || return 0
-	local actual=$(sha256sum "$dat_file" | awk '{print $1}' | tr -d '\r ')
+	local actual=$(sha256sum "$dat_file" | awk '{print tolower($1)}' | tr -d '\r ')
+	[ "$expected" = "$actual" ]
+}
+
+verify_xray_dgst() {
+	local zip_file="$1"
+	local dgst_file="$2"
+	if [ ! -s "$dgst_file" ] || ! command -v sha256sum >/dev/null 2>&1; then
+		return 0
+	fi
+	local expected=$(awk -F'=' '/SHA2?-?256/{gsub(/[^0-9a-fA-F]/,"",$2); if (length($2)==64) {print tolower($2); exit}}' "$dgst_file")
+	[ -n "$expected" ] || return 0
+	local actual=$(sha256sum "$zip_file" | awk '{print tolower($1)}' | tr -d '\r ')
 	[ "$expected" = "$actual" ]
 }
 
@@ -461,6 +497,7 @@ update_xray() {
 	local r_tag=$(parse_release_json "$rel_json" tag 2>/dev/null || true)
 	local zip_name="Xray-linux-${arch}.zip"
 	local zip_url=$(parse_release_json "$rel_json" asset_exact "$zip_name" 2>/dev/null || true)
+	local dgst_url=$(parse_release_json "$rel_json" asset_exact "${zip_name}.dgst" 2>/dev/null || true)
 	[ -n "$zip_url" ] || {
 		log "ERROR: Asset ${zip_name} not found in ${REPO_XRAY} release."
 		return 1
@@ -468,10 +505,24 @@ update_xray() {
 
 	log "Downloading ${zip_name} (${r_tag:-latest})..."
 	local zip_file="$TMP_BASE/xray.zip"
+	local dgst_file="$TMP_BASE/xray.zip.dgst"
 	curl_fetch "$zip_url" "$zip_file" 180 || {
 		log "ERROR: Failed to download ${zip_name}."
 		return 1
 	}
+
+	if [ -n "$dgst_url" ]; then
+		curl_fetch "$dgst_url" "$dgst_file" 20 || true
+		if [ -s "$dgst_file" ]; then
+			if ! verify_xray_dgst "$zip_file" "$dgst_file"; then
+				rm -f "$zip_file" "$dgst_file"
+				log "ERROR: SHA256 (.dgst) verification failed for ${zip_name}!"
+				return 1
+			fi
+			log "SHA256 verified for ${zip_name}."
+		fi
+		rm -f "$dgst_file"
+	fi
 
 	log "Extracting Xray binary..."
 	if ! unzip -o -q "$zip_file" xray -d "$TMP_BASE" >> "$LOG_FILE" 2>&1; then
@@ -495,7 +546,15 @@ update_xray() {
 	fi
 
 	local bak_bin="$TMP_BASE/xray.bak"
-	[ -f "$xray_bin" ] && cp -f "$xray_bin" "$bak_bin" 2>/dev/null || true
+	if [ -f "$xray_bin" ]; then
+		if ! cp -f "$xray_bin" "$bak_bin" 2>/dev/null; then
+			log "ERROR: Insufficient RAM in /tmp to back up ${xray_bin}; aborting safely."
+			if [ "$was_enabled" = "1" ]; then
+				/etc/init.d/owall start >> "$LOG_FILE" 2>&1 || true
+			fi
+			return 1
+		fi
+	fi
 	rm -f "$xray_bin"
 
 	if ! cp -f "$new_bin" "$xray_bin" || ! chmod +x "$xray_bin"; then
@@ -517,8 +576,7 @@ update_xray() {
 	return 0
 }
 
-update_owall() {
-	local no_restart="$1"
+download_owall_pkgs() {
 	local pkg_mgr=$(detect_pkg_mgr)
 	local ext="ipk"
 	[ "$pkg_mgr" = "apk" ] && ext="apk"
@@ -547,11 +605,20 @@ update_owall() {
 		log "ERROR: Failed to download luci-app-owall package."
 		return 1
 	}
+	[ -s "$app_pkg" ] || {
+		log "ERROR: Downloaded luci-app-owall package is empty."
+		return 1
+	}
 	if [ -n "$i18n_url" ]; then
 		curl_fetch "$i18n_url" "$i18n_pkg" 60 || rm -f "$i18n_pkg"
 	fi
+	return 0
+}
 
-	log "Installing package via ${pkg_mgr}..."
+_pkg_install_once() {
+	local pkg_mgr="$1"
+	local app_pkg="$2"
+	local i18n_pkg="$3"
 	if [ "$pkg_mgr" = "apk" ]; then
 		if [ -s "$i18n_pkg" ]; then
 			apk add --allow-untrusted "$app_pkg" "$i18n_pkg" >> "$LOG_FILE" 2>&1
@@ -565,7 +632,30 @@ update_owall() {
 			opkg install --force-reinstall "$app_pkg" >> "$LOG_FILE" 2>&1
 		fi
 	fi
-	local rc=$?
+}
+
+install_owall_pkgs() {
+	local no_restart="$1"
+	local pkg_mgr=$(detect_pkg_mgr)
+	local ext="ipk"
+	[ "$pkg_mgr" = "apk" ] && ext="apk"
+	local app_pkg="$TMP_BASE/luci-app-owall.${ext}"
+	local i18n_pkg="$TMP_BASE/luci-i18n-owall-zh-cn.${ext}"
+
+	log "Installing package via ${pkg_mgr}..."
+	local rc=0
+	_pkg_install_once "$pkg_mgr" "$app_pkg" "$i18n_pkg" || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		log "Initial install returned $rc; refreshing ${pkg_mgr} index and retrying..."
+		if [ "$pkg_mgr" = "apk" ]; then
+			apk update >> "$LOG_FILE" 2>&1 || true
+		else
+			opkg update >> "$LOG_FILE" 2>&1 || true
+		fi
+		rc=0
+		_pkg_install_once "$pkg_mgr" "$app_pkg" "$i18n_pkg" || rc=$?
+	fi
+
 	rm -f "$app_pkg" "$i18n_pkg"
 	if [ "$rc" -ne 0 ]; then
 		log "ERROR: ${pkg_mgr} package installation failed (exit code $rc)."
@@ -585,6 +675,12 @@ update_owall() {
 	return 0
 }
 
+update_owall() {
+	local no_restart="$1"
+	download_owall_pkgs || return 1
+	install_owall_pkgs "$no_restart"
+}
+
 acquire_lock() {
 	mkdir -p /var/lock
 	if ! mkdir "$LOCK_DIR" 2>/dev/null; then
@@ -602,21 +698,24 @@ acquire_lock() {
 
 run_upgrade() {
 	local target="$1"
+	local already_locked="$2"
 	case "$target" in
 		owall|xray|geoip|geosite|all) ;;
 		*) echo "Invalid target: $target"; return 1 ;;
 	esac
 
-	if ! acquire_lock; then
-		echo "Upgrade already in progress."
-		return 1
+	if [ "$already_locked" != "locked" ]; then
+		if ! acquire_lock; then
+			echo "Upgrade already in progress."
+			return 1
+		fi
+		: > "$LOG_FILE"
+		rm -rf "$TMP_BASE"
+		mkdir -p "$TMP_BASE"
+		write_state 1 "running" "$target"
 	fi
-	trap 'rm -rf "$LOCK_DIR" "$TMP_BASE"' EXIT INT TERM
+	trap 'rm -rf "$LOCK_DIR" "$TMP_BASE" /tmp/owall_upgrade_runner.sh' EXIT INT TERM
 
-	: > "$LOG_FILE"
-	rm -rf "$TMP_BASE"
-	mkdir -p "$TMP_BASE"
-	write_state 1 "running" "$target"
 	log "Starting upgrade task: target=${target}"
 
 	local ok=1
@@ -629,8 +728,10 @@ run_upgrade() {
 			local was_enabled=$(uci -q get owall.global.enabled)
 			update_geo "geoip" "no_restart" || ok=0
 			[ "$ok" -eq 1 ] && { update_geo "geosite" "no_restart" || ok=0; }
+			# Download Owall packages BEFORE update_xray stops the active proxy tunnel
+			[ "$ok" -eq 1 ] && { download_owall_pkgs || ok=0; }
 			[ "$ok" -eq 1 ] && { update_xray "no_restart" || ok=0; }
-			[ "$ok" -eq 1 ] && { update_owall "no_restart" || ok=0; }
+			[ "$ok" -eq 1 ] && { install_owall_pkgs "no_restart" || ok=0; }
 			if [ "$was_enabled" = "1" ]; then
 				log "Restarting Owall service after full upgrade..."
 				/etc/init.d/owall restart >> "$LOG_FILE" 2>&1 || true
@@ -639,7 +740,7 @@ run_upgrade() {
 	esac
 
 	local_versions >/dev/null 2>&1 || true
-	rm -rf "$TMP_BASE"
+	rm -rf "$TMP_BASE" /tmp/owall_upgrade_runner.sh
 	rmdir "$LOCK_DIR" 2>/dev/null || true
 	trap - EXIT INT TERM
 
@@ -660,11 +761,25 @@ start_bg() {
 		owall|xray|geoip|geosite|all) ;;
 		*) echo '{"started":false,"error":"invalid_target"}'; return 1 ;;
 	esac
-	if [ -d "$LOCK_DIR" ]; then
+	if ! acquire_lock; then
 		echo '{"started":false,"error":"busy"}'
 		return 0
 	fi
-	/usr/share/owall/upgrade.sh run "$target" >/dev/null 2>&1 &
+	: > "$LOG_FILE"
+	rm -rf "$TMP_BASE"
+	mkdir -p "$TMP_BASE"
+	write_state 1 "running" "$target"
+
+	# Copy script to /tmp so self-upgrade never overwrites the running interpreter script
+	local runner="/tmp/owall_upgrade_runner.sh"
+	if ! cp -f "/usr/share/owall/upgrade.sh" "$runner" || ! chmod +x "$runner"; then
+		rm -rf "$LOCK_DIR" "$TMP_BASE" "$runner"
+		write_state 0 "error" "$target"
+		echo '{"started":false,"error":"copy_failed"}'
+		return 1
+	fi
+
+	"$runner" run_locked "$target" </dev/null >/dev/null 2>&1 &
 	echo '{"started":true}'
 }
 
@@ -672,8 +787,10 @@ case "$1" in
 	local_versions) local_versions ;;
 	check) check_updates ;;
 	run) run_upgrade "$2" ;;
+	run_locked) run_upgrade "$2" "locked" ;;
 	start_bg) start_bg "$2" ;;
 	detect_arch) detect_xray_arch "$2" ;;
 	verify_sha) verify_geo_sha256 "$2" "$3" ;;
+	verify_dgst) verify_xray_dgst "$2" "$3" ;;
 	*) echo "Usage: $0 {local_versions|check|run <target>|start_bg <target>}" ;;
 esac

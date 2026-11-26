@@ -7,6 +7,32 @@ DNS_PORT=$(uci -q get owall.global.dns_port || echo 5335)
 FWMARK=0x1
 XRAY_MARK=0xff
 ROUTETABLE=100
+NFT_LOCK_DIR="/var/lock/owall_nft.lock.d"
+CN_COUNT_FILE="/tmp/owall_cn_count.$$.tmp"
+
+acquire_nft_lock() {
+	mkdir -p /var/lock
+	local waited=0
+	while ! mkdir "$NFT_LOCK_DIR" 2>/dev/null; do
+		local now=$(date +%s)
+		local mtime=$(date -r "$NFT_LOCK_DIR" +%s 2>/dev/null || echo 0)
+		if [ "$mtime" -gt 0 ] && [ $((now - mtime)) -gt 60 ]; then
+			rmdir "$NFT_LOCK_DIR" 2>/dev/null || true
+			continue
+		fi
+		[ "$waited" -ge 20 ] && return 1
+		sleep 1
+		waited=$((waited + 1))
+	done
+	trap 'rmdir "$NFT_LOCK_DIR" 2>/dev/null || true; rm -f "$CN_COUNT_FILE"' EXIT INT TERM
+	return 0
+}
+
+release_nft_lock() {
+	rmdir "$NFT_LOCK_DIR" 2>/dev/null || true
+	rm -f "$CN_COUNT_FILE"
+	trap - EXIT INT TERM
+}
 
 set_tproxy_sysctl() {
 	# Required for TPROXY and single-arm / bypass gateway (旁路由) routing
@@ -22,7 +48,7 @@ set_tproxy_sysctl() {
 }
 
 batch_load_cidrs() {
-	awk '
+	awk -v out_file="$CN_COUNT_FILE" '
 	/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ {
 		if (c == 0) line = $1;
 		else line = line "," $1;
@@ -34,12 +60,12 @@ batch_load_cidrs() {
 	}
 	END {
 		if (c > 0) printf "add element inet owall owall_direct { %s }\n", line;
-		printf "%d\n", total+0 > "/tmp/owall_cn_count.tmp";
+		printf "%d\n", total+0 > out_file;
 	}' | nft -f - 2>/dev/null || true
 }
 
 load_cn_cidrs() {
-	rm -f /tmp/owall_cn_count.tmp
+	rm -f "$CN_COUNT_FILE"
 	if command -v geoview >/dev/null 2>&1 && [ -f "/usr/share/v2ray/geoip.dat" ]; then
 		geoview -i /usr/share/v2ray/geoip.dat -c cn -4 2>/dev/null | batch_load_cidrs
 	elif command -v geoview >/dev/null 2>&1 && [ -f "/usr/share/xray/geoip.dat" ]; then
@@ -49,13 +75,23 @@ load_cn_cidrs() {
 	elif [ -f "/etc/owall/china_ip.txt" ]; then
 		batch_load_cidrs < /etc/owall/china_ip.txt
 	fi
-	local cnt=$(cat /tmp/owall_cn_count.tmp 2>/dev/null || echo 0)
-	rm -f /tmp/owall_cn_count.tmp
+	local cnt=$(cat "$CN_COUNT_FILE" 2>/dev/null || echo 0)
+	rm -f "$CN_COUNT_FILE"
 	echo "[nftables] Loaded ${cnt:-0} China IPv4 CIDRs into @owall_direct."
 }
 
+cleanup_nftables_rules() {
+	nft delete table inet owall 2>/dev/null || true
+	ip rule del fwmark $FWMARK table $ROUTETABLE 2>/dev/null || true
+	ip route del local 0.0.0.0/0 dev lo table $ROUTETABLE 2>/dev/null || true
+}
+
 start_nftables() {
-	stop_nftables 2>/dev/null || true
+	acquire_nft_lock || {
+		echo "[nftables] WARNING: timed out waiting for nftables lock."
+		return 1
+	}
+	cleanup_nftables_rules
 	set_tproxy_sysctl
 
 	# Set up IP policy routing for TPROXY (idempotent)
@@ -124,6 +160,7 @@ start_nftables() {
 	EOF
 	then
 		echo "[nftables] ERROR: nft failed to load table inet owall!"
+		release_nft_lock
 		return 1
 	fi
 
@@ -133,26 +170,29 @@ start_nftables() {
 		nft add element inet owall owall_direct { $lip } 2>/dev/null || true
 	done
 
-	# Add active node IP to direct set
+	# Add all resolved IPv4 A records of active node to direct set
 	local active_node=$(uci -q get owall.global.active_node)
 	if [ -n "$active_node" ]; then
 		local node_ip=$(uci -q get owall.${active_node}.address)
 		if [ -n "$node_ip" ]; then
-			local resolved=$(resolveip -4 "$node_ip" 2>/dev/null | head -n 1)
-			[ -n "$resolved" ] && nft add element inet owall owall_direct { $resolved } 2>/dev/null || true
+			local resolved
+			for resolved in $(resolveip -4 "$node_ip" 2>/dev/null); do
+				[ -n "$resolved" ] && nft add element inet owall owall_direct { $resolved } 2>/dev/null || true
+			done
 		fi
 	fi
 
 	# Load China IPv4 CIDRs in 500-entry batches for true Layer-3 hardware bypass
 	load_cn_cidrs
+	release_nft_lock
 
-	echo "[nftables] Owall transparent proxy (TPROXY + DNS) rules loaded."
+	echo "[nftables] Owall transparent proxy (IPv4 TPROXY + DNS) rules loaded."
 }
 
 stop_nftables() {
-	nft delete table inet owall 2>/dev/null || true
-	ip rule del fwmark $FWMARK table $ROUTETABLE 2>/dev/null || true
-	ip route del local 0.0.0.0/0 dev lo table $ROUTETABLE 2>/dev/null || true
+	acquire_nft_lock || true
+	cleanup_nftables_rules
+	release_nft_lock
 	echo "[nftables] Owall nftables rules cleaned up."
 }
 

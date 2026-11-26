@@ -90,7 +90,8 @@ local function parse_vless(link)
 		network = nonempty(q.type, "tcp"),
 		path = nonempty(q.path, "/"),
 		mode = nonempty(q.mode, "auto"),
-		serviceName = nonempty(q.serviceName)
+		serviceName = nonempty(q.serviceName),
+		insecure = (q.allowInsecure == "1" or q.insecure == "1" or q.allowInsecure == "true" or q.insecure == "true") and "1" or "0"
 	}
 end
 
@@ -116,7 +117,8 @@ local function parse_trojan(link)
 		sid = nonempty(q.sid),
 		network = nonempty(q.type, "tcp"),
 		path = nonempty(q.path, "/"),
-		serviceName = nonempty(q.serviceName)
+		serviceName = nonempty(q.serviceName),
+		insecure = (q.allowInsecure == "1" or q.insecure == "1" or q.allowInsecure == "true" or q.insecure == "true") and "1" or "0"
 	}
 end
 
@@ -157,6 +159,8 @@ local function parse_vmess(link)
 	local decoded = b64decode(body)
 	local info = jsonc.parse(decoded)
 	if not info or not info.add or not info.port then return nil end
+	local net = nonempty(info.net, "tcp")
+	local insecure = (info.allowInsecure == true or info.allowInsecure == 1 or info.allowInsecure == "1" or info.insecure == true or info.insecure == 1 or info.insecure == "1") and "1" or "0"
 	return {
 		type = "vmess",
 		remarks = nonempty(info.ps, info.add .. ":" .. info.port),
@@ -165,11 +169,13 @@ local function parse_vmess(link)
 		uuid = info.id,
 		alterId = tostring(info.aid or 0),
 		security = (info.tls == "tls") and "tls" or "none",
-		network = nonempty(info.net, "tcp"),
+		network = net,
 		sni = nonempty(info.sni, info.host, info.add),
 		host = nonempty(info.host, info.sni, info.add),
 		path = nonempty(info.path, "/"),
-		fp = nonempty(info.fp, "chrome")
+		serviceName = (net == "grpc") and nonempty(info.path) or "",
+		fp = nonempty(info.fp, "chrome"),
+		insecure = insecure
 	}
 end
 
@@ -245,13 +251,7 @@ local function extract_kv_recursive(body, out)
 	end
 end
 
-local function parse_clash_inline(line)
-	local body = line:match("^%-?%s*{(.*)}%s*$")
-	if not body then return nil end
-
-	local m = {}
-	extract_kv_recursive(body, m)
-
+local function build_clash_node(m)
 	local t = (m.type or ""):lower()
 	local host = m.server
 	local port = m.port and tostring(m.port):match("^(%d+)$")
@@ -330,10 +330,11 @@ local function parse_clash_inline(line)
 			sni = sni,
 			host = nonempty(m.host, sni),
 			path = nonempty(m.path, "/"),
+			serviceName = (net == "grpc") and nonempty(m["grpc-service-name"], m.servicename, m.path) or "",
 			fp = fp,
 			insecure = insecure
 		}
-	elseif t == "hysteria2" and m.password then
+	elseif (t == "hysteria2" or t == "hy2") and m.password then
 		return {
 			type = "hysteria2",
 			remarks = remarks,
@@ -345,6 +346,76 @@ local function parse_clash_inline(line)
 		}
 	end
 	return nil
+end
+
+local function parse_clash_inline(line)
+	local body = line:match("^%-?%s*{(.*)}%s*$")
+	if not body then return nil end
+
+	local m = {}
+	extract_kv_recursive(body, m)
+	return build_clash_node(m)
+end
+
+local function strip_yaml_comment(v)
+	local stripped = v:match("^([^\"'#]+)%s+#.*$")
+	return stripped and trim(stripped) or v
+end
+
+-- Parse indented multi-line Clash YAML proxies blocks without overlapping inline {- ...} items
+local function parse_clash_block_nodes(lines)
+	local nodes = {}
+	local in_proxies = false
+	local cur = nil
+
+	local function flush_cur()
+		if cur then
+			local n = build_clash_node(cur)
+			if n then nodes[#nodes + 1] = n end
+			cur = nil
+		end
+	end
+
+	for _, raw in ipairs(lines) do
+		local clean = raw:gsub("\r", "")
+		local trimmed = trim(clean)
+		if trimmed == "" or trimmed:find("^#") then
+			-- skip blanks/comments
+		elseif clean:match("^proxies:%s*$") then
+			flush_cur()
+			in_proxies = true
+		elseif clean:match("^[%w_%-]+:") then
+			-- Any other top-level unindented YAML section ends proxies block
+			flush_cur()
+			in_proxies = false
+		elseif clean:match("^%s*%-%s*{.*}$") then
+			-- Inline flow-style item is handled by parse_line()
+			flush_cur()
+		else
+			local item_rest = clean:match("^%s*%-%s+(.+)$")
+			if item_rest then
+				if in_proxies or item_rest:match("^[%w_%-]+%s*:") then
+					in_proxies = true
+					flush_cur()
+					cur = {}
+					local k, v = item_rest:match("^([%w_%-]+)%s*:%s*(.-)%s*$")
+					if k and v ~= "" then
+						cur[k:lower()] = strip_quotes(strip_yaml_comment(v))
+					end
+				end
+			elseif cur and clean:match("^%s+") then
+				local k, v = trimmed:match("^([%w_%-]+)%s*:%s*(.-)%s*$")
+				if k and v ~= "" then
+					local kl = k:lower()
+					if cur[kl] == nil then
+						cur[kl] = strip_quotes(strip_yaml_comment(v))
+					end
+				end
+			end
+		end
+	end
+	flush_cur()
+	return nodes
 end
 
 local function parse_line(line)
@@ -407,10 +478,10 @@ local function run()
 
 	local lines_to_parse = {}
 	for raw_line in input:gmatch("[^\r\n]+") do
-		raw_line = trim(raw_line)
-		if raw_line:find("^https?://") then
-			print("[sub_parser] Fetching subscription: " .. raw_line)
-			local sub_body = fetch_url(raw_line)
+		local tline = trim(raw_line)
+		if tline:find("^https?://") then
+			print("[sub_parser] Fetching subscription: " .. tline)
+			local sub_body = fetch_url(tline)
 			if not sub_body:find("://") and not sub_body:find("proxies:") then
 				local decoded = b64decode(sub_body)
 				if decoded and (decoded:find("://") or decoded:find("proxies:")) then
@@ -420,7 +491,7 @@ local function run()
 			for sub_line in sub_body:gmatch("[^\r\n]+") do
 				table.insert(lines_to_parse, sub_line)
 			end
-		elseif raw_line ~= "" then
+		elseif tline ~= "" then
 			table.insert(lines_to_parse, raw_line)
 		end
 	end
@@ -430,8 +501,7 @@ local function run()
 	local count = 0
 	local first_node_id = nil
 
-	for _, line in ipairs(lines_to_parse) do
-		local node = parse_line(line)
+	local function save_node(node)
 		if node and node.address and node.port then
 			count = count + 1
 			local node_id = "node_" .. count
@@ -440,6 +510,14 @@ local function run()
 				first_node_id = node_id
 			end
 		end
+	end
+
+	for _, line in ipairs(lines_to_parse) do
+		save_node(parse_line(line))
+	end
+
+	for _, node in ipairs(parse_clash_block_nodes(lines_to_parse)) do
+		save_node(node)
 	end
 
 	if count > 0 then

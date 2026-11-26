@@ -149,7 +149,7 @@ jobs:
           OpenWrt 极简全自动透明代理插件（Xray-core + FakeDNS 0ms + nftables 国内硬件级硬直通）。
 
           ### 包含安装包
-          - **IPK（适用于 OpenWrt 21.02 ~ 24.10 / opkg）**：`luci-app-owall_*.ipk` + `luci-i18n-owall-zh-cn_*.ipk`
+          - **IPK（适用于 OpenWrt 22.03 ~ 24.10 / fw4 / opkg）**：`luci-app-owall_*.ipk` + `luci-i18n-owall-zh-cn_*.ipk`
           - **APK（适用于 OpenWrt 25.12+ / Snapshot / apk）**：`luci-app-owall-*.apk` + `luci-i18n-owall-zh-cn-*.apk`
 
           ### 快速安装
