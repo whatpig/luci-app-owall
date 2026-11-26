@@ -21,6 +21,39 @@ set_tproxy_sysctl() {
 	done
 }
 
+batch_load_cidrs() {
+	awk '
+	/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ {
+		if (c == 0) line = $1;
+		else line = line "," $1;
+		c++; total++;
+		if (c >= 500) {
+			printf "add element inet owall owall_direct { %s }\n", line;
+			c = 0; line = "";
+		}
+	}
+	END {
+		if (c > 0) printf "add element inet owall owall_direct { %s }\n", line;
+		printf "%d\n", total+0 > "/tmp/owall_cn_count.tmp";
+	}' | nft -f - 2>/dev/null || true
+}
+
+load_cn_cidrs() {
+	rm -f /tmp/owall_cn_count.tmp
+	if command -v geoview >/dev/null 2>&1 && [ -f "/usr/share/v2ray/geoip.dat" ]; then
+		geoview -i /usr/share/v2ray/geoip.dat -c cn -4 2>/dev/null | batch_load_cidrs
+	elif command -v geoview >/dev/null 2>&1 && [ -f "/usr/share/xray/geoip.dat" ]; then
+		geoview -i /usr/share/xray/geoip.dat -c cn -4 2>/dev/null | batch_load_cidrs
+	elif [ -f "/usr/share/v2ray/china.txt" ]; then
+		batch_load_cidrs < /usr/share/v2ray/china.txt
+	elif [ -f "/etc/owall/china_ip.txt" ]; then
+		batch_load_cidrs < /etc/owall/china_ip.txt
+	fi
+	local cnt=$(cat /tmp/owall_cn_count.tmp 2>/dev/null || echo 0)
+	rm -f /tmp/owall_cn_count.tmp
+	echo "[nftables] Loaded ${cnt:-0} China IPv4 CIDRs into @owall_direct."
+}
+
 start_nftables() {
 	stop_nftables 2>/dev/null || true
 	set_tproxy_sysctl
@@ -110,12 +143,8 @@ start_nftables() {
 		fi
 	fi
 
-	# Add GeoIP CN to direct set if china.txt / geoview exists
-	if [ -f "/usr/share/v2ray/china.txt" ]; then
-		awk '{print "add element inet owall owall_direct { "$1" }"}' /usr/share/v2ray/china.txt | nft -f - 2>/dev/null || true
-	elif command -v geoview >/dev/null 2>&1 && [ -f "/usr/share/v2ray/geoip.dat" ]; then
-		geoview -i /usr/share/v2ray/geoip.dat -c cn -4 2>/dev/null | awk '{print "add element inet owall owall_direct { "$1" }"}' | nft -f - 2>/dev/null || true
-	fi
+	# Load China IPv4 CIDRs in 500-entry batches for true Layer-3 hardware bypass
+	load_cn_cidrs
 
 	echo "[nftables] Owall transparent proxy (TPROXY + DNS) rules loaded."
 }

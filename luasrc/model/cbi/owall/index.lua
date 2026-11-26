@@ -35,6 +35,13 @@ uci:foreach("owall", "nodes", function(n)
 	o_node:value(n[".name"], label)
 end)
 
+-- 4. Optional Custom Direct Domains
+local o_direct = s:option(TextValue, "direct_domains", translate("Custom Direct Domains (Optional)"),
+	translate("Optional fallback for unlisted intranet/domestic domains (one per line). Uses local DNS and direct routing."))
+o_direct.rows = 2
+o_direct.wrap = "off"
+o_direct.rmempty = true
+
 -- Commit hook: use a FRESH UCI cursor; app.sh prepare handles smart MD5-cached parsing
 function m.on_after_commit(self)
 	local cur = uci_mod.cursor()

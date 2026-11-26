@@ -43,10 +43,16 @@ start_iptables() {
 		[ -n "$resolved" ] && ipset add owall_direct $resolved 2>/dev/null || true
 	fi
 
+	local cn_file=""
 	if [ -f "/usr/share/v2ray/china.txt" ]; then
-		while read -r line; do
-			ipset add owall_direct "$line" 2>/dev/null || true
-		done < /usr/share/v2ray/china.txt
+		cn_file="/usr/share/v2ray/china.txt"
+	elif [ -f "/etc/owall/china_ip.txt" ]; then
+		cn_file="/etc/owall/china_ip.txt"
+	fi
+	if [ -n "$cn_file" ]; then
+		awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ { printf "add -exist owall_direct %s\n", $1 }' "$cn_file" | ipset restore -! 2>/dev/null || true
+	elif command -v geoview >/dev/null 2>&1 && [ -f "/usr/share/v2ray/geoip.dat" ]; then
+		geoview -i /usr/share/v2ray/geoip.dat -c cn -4 2>/dev/null | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ { printf "add -exist owall_direct %s\n", $1 }' | ipset restore -! 2>/dev/null || true
 	fi
 
 	iptables -t nat -N OWALL_DNS 2>/dev/null || iptables -t nat -F OWALL_DNS

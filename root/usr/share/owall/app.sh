@@ -4,6 +4,7 @@ CONFIG="owall"
 CORE_BIN="xray"
 CONFIG_FILE="/var/etc/owall.json"
 HASH_FILE="/var/etc/owall_input.md5"
+CHINA_IP_FILE="/etc/owall/china_ip.txt"
 LOCK_FILE="/var/lock/owall.lock"
 LOG_FILE="/var/log/owall.log"
 
@@ -25,6 +26,43 @@ has_nft() {
 
 get_owall_pids() {
 	ps w 2>/dev/null | grep "[/ ]var/etc/owall.json" | awk '{print $1}'
+}
+
+ensure_china_ip() {
+	if [ -f "/usr/share/v2ray/china.txt" ]; then
+		return 0
+	fi
+	if command -v geoview >/dev/null 2>&1 && { [ -f "/usr/share/v2ray/geoip.dat" ] || [ -f "/usr/share/xray/geoip.dat" ]; }; then
+		return 0
+	fi
+
+	if [ -f "$CHINA_IP_FILE" ]; then
+		local cnt=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$CHINA_IP_FILE" 2>/dev/null || echo 0)
+		local now=$(date +%s)
+		local mtime=$(date -r "$CHINA_IP_FILE" +%s 2>/dev/null)
+		if [ "$cnt" -ge 500 ] && [ -n "$mtime" ] && [ $((now - mtime)) -lt 604800 ]; then
+			return 0
+		fi
+	fi
+
+	mkdir -p /etc/owall
+	local tmp_file="/tmp/owall_china_ip.tmp.$$"
+	local url
+	for url in "https://ispip.clang.cn/all_cn.txt" "https://cdn.jsdelivr.net/gh/gaoyifan/china-operator-ip@ip-lists/china.txt"; do
+		curl -sL --connect-timeout 5 -m 15 -A 'Owall/1.2' "$url" -o "$tmp_file" 2>/dev/null || continue
+		local cnt=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$tmp_file" 2>/dev/null || echo 0)
+		if [ "$cnt" -ge 500 ]; then
+			grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$tmp_file" > "${CHINA_IP_FILE}.tmp.$$"
+			mv -f "${CHINA_IP_FILE}.tmp.$$" "$CHINA_IP_FILE"
+			rm -f "$tmp_file"
+			echo "[app] Updated $CHINA_IP_FILE ($cnt CIDRs from $url)."
+			return 0
+		fi
+	done
+
+	rm -f "$tmp_file" "${CHINA_IP_FILE}.tmp.$$"
+	echo "[app] WARNING: failed to fetch China IP list; Layer-3 bypass will use cached or Xray GeoIP rules."
+	return 0
 }
 
 start_firewall() {
@@ -69,6 +107,7 @@ prepare() {
 	fi
 
 	sync_nodes "$1" || return 1
+	ensure_china_ip
 	lua /usr/share/owall/gen_config.lua || return 1
 
 	if ! "$CORE_BIN" run -test -c "$CONFIG_FILE"; then

@@ -75,3 +75,9 @@ msgstr "可手动指定出口节点，或保持自动选择（最低延迟）。
 
 msgid "Auto-Select (Lowest Latency)"
 msgstr "自动选择（最低延迟最优节点）"
+
+msgid "Custom Direct Domains (Optional)"
+msgstr "自定义直连域名（可选）"
+
+msgid "Optional fallback for unlisted intranet/domestic domains (one per line). Uses local DNS and direct routing."
+msgstr "可留空。仅当遇到未收录的企业内网或生僻国内域名时填写（一行一个，如 oa.company.cn），强制走本地 DNS 并直连。"

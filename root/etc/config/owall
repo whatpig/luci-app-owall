@@ -7,5 +7,6 @@ config global 'global'
 	option socks_port '1080'
 	option dns_port '5335'
 	option auto_switch '1'
+	option direct_domains ''
 
 # Parsed nodes will be automatically populated below by owall-parser

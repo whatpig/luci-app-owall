@@ -20,6 +20,21 @@ local function urldecode(s)
 	return s
 end
 
+local function trim(s)
+	return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function strip_quotes(s)
+	s = trim(s)
+	if #s >= 2 then
+		local q1, q2 = s:sub(1, 1), s:sub(-1, -1)
+		if (q1 == '"' and q2 == '"') or (q1 == "'" and q2 == "'") then
+			return s:sub(2, -2)
+		end
+	end
+	return s
+end
+
 local function parse_query(qs)
 	local t = {}
 	if not qs or qs == "" then return t end
@@ -166,19 +181,212 @@ local function parse_hysteria2(link)
 	}
 end
 
+-- Brace/quote-aware splitter for inline flow-style Clash YAML maps: {k: v, nested: {k2: v2}}
+local function split_top_commas(s)
+	local parts = {}
+	local depth, quote, cur = 0, nil, {}
+	for i = 1, #s do
+		local c = s:sub(i, i)
+		if quote then
+			cur[#cur + 1] = c
+			if c == quote and s:sub(i - 1, i - 1) ~= "\\" then
+				quote = nil
+			end
+		else
+			if c == '"' or c == "'" then
+				quote = c
+				cur[#cur + 1] = c
+			elseif c == "{" or c == "[" then
+				depth = depth + 1
+				cur[#cur + 1] = c
+			elseif c == "}" or c == "]" then
+				depth = math.max(0, depth - 1)
+				cur[#cur + 1] = c
+			elseif c == "," and depth == 0 then
+				parts[#parts + 1] = table.concat(cur)
+				cur = {}
+			else
+				cur[#cur + 1] = c
+			end
+		end
+	end
+	if #cur > 0 then
+		parts[#parts + 1] = table.concat(cur)
+	end
+	return parts
+end
+
+local function extract_kv_recursive(body, out)
+	for _, item in ipairs(split_top_commas(body)) do
+		local k, v = item:match("^%s*([%w_%-]+)%s*:%s*(.-)%s*$")
+		if k and v then
+			local kl = k:lower()
+			if v:sub(1, 1) == "{" and v:sub(-1, -1) == "}" then
+				extract_kv_recursive(v:sub(2, -2), out)
+			else
+				if out[kl] == nil then
+					out[kl] = strip_quotes(v)
+				end
+			end
+		end
+	end
+end
+
+local function parse_clash_inline(line)
+	local body = line:match("^%-?%s*{(.*)}%s*$")
+	if not body then return nil end
+
+	local m = {}
+	extract_kv_recursive(body, m)
+
+	local t = (m.type or ""):lower()
+	local host = m.server
+	local port = m.port and tostring(m.port):match("^(%d+)$")
+	if not host or host == "" or not port then return nil end
+
+	local remarks = (m.name and m.name ~= "") and m.name or (host .. ":" .. port)
+	local sni = m.sni or m.servername or host
+	local insecure = (m["skip-cert-verify"] == "true") and "1" or "0"
+	local fp = m["client-fingerprint"] or "chrome"
+	local net = m.network or "tcp"
+
+	if t == "vless" and m.uuid then
+		local sec = "none"
+		if m["public-key"] and m["public-key"] ~= "" then
+			sec = "reality"
+		elseif m.tls == "true" then
+			sec = "tls"
+		end
+		return {
+			type = "vless",
+			remarks = remarks,
+			address = host,
+			port = port,
+			uuid = m.uuid,
+			flow = m.flow or "",
+			encryption = "none",
+			security = sec,
+			sni = sni,
+			host = m.host or sni,
+			fp = fp,
+			pbk = m["public-key"] or "",
+			sid = m["short-id"] or "",
+			spx = "/",
+			network = net,
+			path = m.path or "/",
+			serviceName = m["grpc-service-name"] or m.servicename or "",
+			insecure = insecure
+		}
+	elseif t == "trojan" and m.password then
+		return {
+			type = "trojan",
+			remarks = remarks,
+			address = host,
+			port = port,
+			password = m.password,
+			security = (m["public-key"] and m["public-key"] ~= "") and "reality" or "tls",
+			sni = sni,
+			host = m.host or sni,
+			fp = fp,
+			pbk = m["public-key"] or "",
+			sid = m["short-id"] or "",
+			network = net,
+			path = m.path or "/",
+			serviceName = m["grpc-service-name"] or m.servicename or "",
+			insecure = insecure
+		}
+	elseif t == "ss" and m.cipher and m.password then
+		return {
+			type = "shadowsocks",
+			remarks = remarks,
+			address = host,
+			port = port,
+			method = m.cipher,
+			password = m.password
+		}
+	elseif t == "vmess" and m.uuid then
+		return {
+			type = "vmess",
+			remarks = remarks,
+			address = host,
+			port = port,
+			uuid = m.uuid,
+			alterId = tostring(m.alterid or 0),
+			security = (m.tls == "true") and "tls" or "none",
+			network = net,
+			sni = sni,
+			host = m.host or sni,
+			path = m.path or "/",
+			fp = fp,
+			insecure = insecure
+		}
+	elseif t == "hysteria2" and m.password then
+		return {
+			type = "hysteria2",
+			remarks = remarks,
+			address = host,
+			port = port,
+			password = m.password,
+			sni = sni,
+			insecure = insecure
+		}
+	end
+	return nil
+end
+
 local function parse_line(line)
-	line = line:gsub("%s+$", ""):gsub("^%s+", "")
+	line = trim(line)
+	if line == "" or line:find("^#") or line == "proxies:" then return nil end
 	if line:find("^vless://") then return parse_vless(line) end
 	if line:find("^trojan://") then return parse_trojan(line) end
 	if line:find("^ss://") then return parse_ss(line) end
 	if line:find("^vmess://") then return parse_vmess(line) end
 	if line:find("^hysteria2://") or line:find("^hy2://") then return parse_hysteria2(line) end
+	if line:find("^%-?%s*{.*}$") then return parse_clash_inline(line) end
 	return nil
 end
 
+local function looks_like_sub(body)
+	if not body or body == "" then return false end
+	if body:find("://") or body:find("proxies:") then return true end
+	local decoded = b64decode(body)
+	if decoded and (decoded:find("://") or decoded:find("proxies:")) then
+		return true
+	end
+	return false
+end
+
+local function fetch_url(url)
+	local safe_url = url:gsub("'", "'\\''")
+	local cmd_direct = "curl -sL -k --connect-timeout 8 -m 20 -A 'Owall/1.2' '" .. safe_url .. "'"
+	local f = io.popen(cmd_direct)
+	local body = ""
+	if f then
+		body = f:read("*all") or ""
+		f:close()
+	end
+	if looks_like_sub(body) then
+		return body
+	end
+
+	-- Fallback: retry via local Xray SOCKS port in case subscription domain is blocked
+	local socks_port = uci:get(CONFIG, "global", "socks_port") or "1080"
+	if socks_port == "" then socks_port = "1080" end
+	print("[sub_parser] Direct subscription fetch failed; retrying via 127.0.0.1:" .. socks_port)
+	local cmd_proxy = "curl -sL -k --connect-timeout 8 -m 20 --socks5-hostname 127.0.0.1:" .. socks_port .. " -A 'Owall/1.2' '" .. safe_url .. "'"
+	local fp = io.popen(cmd_proxy)
+	if fp then
+		local pbody = fp:read("*all") or ""
+		fp:close()
+		if looks_like_sub(pbody) then
+			return pbody
+		end
+	end
+	return body
+end
+
 local function run()
-	local input = uci:get(CONFIG, "global", "node_input") or ""
-	input = input:gsub("^%s+", ""):gsub("%s+$", "")
+	local input = trim(uci:get(CONFIG, "global", "node_input") or "")
 	if input == "" then
 		print("[sub_parser] No node or subscription input found.")
 		return
@@ -186,19 +394,15 @@ local function run()
 
 	local lines_to_parse = {}
 	for raw_line in input:gmatch("[^\r\n]+") do
-		raw_line = raw_line:gsub("^%s+", ""):gsub("%s+$", "")
+		raw_line = trim(raw_line)
 		if raw_line:find("^https?://") then
 			print("[sub_parser] Fetching subscription: " .. raw_line)
-			local safe_url = raw_line:gsub("'", "'\\''")
-			local f = io.popen("curl -sL -k --connect-timeout 10 -m 30 -A 'Owall/1.1' '" .. safe_url .. "'")
-			local sub_body = ""
-			if f then
-				sub_body = f:read("*all") or ""
-				f:close()
-			end
-			local decoded = b64decode(sub_body)
-			if decoded and decoded:find("://") then
-				sub_body = decoded
+			local sub_body = fetch_url(raw_line)
+			if not sub_body:find("://") and not sub_body:find("proxies:") then
+				local decoded = b64decode(sub_body)
+				if decoded and (decoded:find("://") or decoded:find("proxies:")) then
+					sub_body = decoded
+				end
 			end
 			for sub_line in sub_body:gmatch("[^\r\n]+") do
 				table.insert(lines_to_parse, sub_line)

@@ -39,26 +39,77 @@ test_node() {
 }
 
 auto_select_best() {
+	local skip_node="$1"
 	local best_node=""
 	local min_latency=9999
+	local fallback_lat=9999
 
 	for section in $(uci -q show owall | grep "=nodes" | cut -d'.' -f2 | cut -d'=' -f1); do
 		local lat=$(test_node "$section")
+		if [ "$section" = "$skip_node" ]; then
+			fallback_lat="$lat"
+			continue
+		fi
 		if [ "$lat" -lt "$min_latency" ] && [ "$lat" -gt 0 ]; then
 			min_latency="$lat"
 			best_node="$section"
 		fi
 	done
 
+	if [ -z "$best_node" ] && [ -n "$skip_node" ] && [ "$fallback_lat" -lt 9999 ] && [ "$fallback_lat" -gt 0 ]; then
+		best_node="$skip_node"
+		min_latency="$fallback_lat"
+	fi
+
 	if [ -n "$best_node" ] && [ "$min_latency" -lt 9999 ]; then
-		uci -q set owall.global.active_node="$best_node"
-		uci -q commit owall
-		rm -f "$STATUS_FILE"
-		echo "Best node selected: $best_node ($min_latency ms)"
-		if is_owall_running; then
-			/etc/init.d/owall restart >/dev/null 2>&1
+		local cur=$(uci -q get owall.global.active_node)
+		if [ "$best_node" != "$cur" ]; then
+			uci -q set owall.global.active_node="$best_node"
+			uci -q commit owall
+			rm -f "$STATUS_FILE"
+			echo "Best node selected: $best_node ($min_latency ms)"
+			if is_owall_running; then
+				/etc/init.d/owall restart >/dev/null 2>&1
+			fi
+		else
+			echo "Current node $best_node remains optimal ($min_latency ms)"
 		fi
 	fi
+}
+
+watchdog() {
+	while true; do
+		sleep 60
+		local enabled=$(uci -q get owall.global.enabled)
+		local auto_sw=$(uci -q get owall.global.auto_switch)
+		[ "$enabled" = "1" ] && [ "$auto_sw" = "1" ] || continue
+
+		local node_count=$(uci -q show owall | grep -c "=nodes" 2>/dev/null || echo 0)
+		[ "$node_count" -ge 2 ] || continue
+
+		is_owall_running || continue
+
+		local socks_port=$(uci -q get owall.global.socks_port || echo 1080)
+		[ -n "$socks_port" ] || socks_port=1080
+
+		local ok=0
+		local i=1
+		while [ "$i" -le 3 ]; do
+			local code=$(curl -s -o /dev/null -w "%{http_code}" -k -m 5 --socks5-hostname "127.0.0.1:${socks_port}" https://www.google.com/generate_204 2>/dev/null)
+			if [ "$code" = "204" ] || [ "$code" = "200" ]; then
+				ok=1
+				break
+			fi
+			[ "$i" -lt 3 ] && sleep 5
+			i=$((i + 1))
+		done
+
+		if [ "$ok" -eq 0 ]; then
+			local cur=$(uci -q get owall.global.active_node)
+			echo "[$(date '+%F %T')] [watchdog] Active node ($cur) failed 3 health checks, switching to best available node..." >> "$LOG_FILE"
+			auto_select_best "$cur" >> "$LOG_FILE" 2>&1
+		fi
+	done
 }
 
 check_status() {
@@ -121,6 +172,7 @@ check_status() {
 
 case "$1" in
 	auto) auto_select_best ;;
+	watchdog) watchdog ;;
 	status) check_status "$2" ;;
 	test) test_node "$2" ;;
 	*) check_status "$2" ;;

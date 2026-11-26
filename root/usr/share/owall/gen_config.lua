@@ -262,9 +262,11 @@ local function generate()
 
 	-- Build DNS servers:
 	-- servers[1] MUST be "fakedns" so all foreign / unmatched domains get Fake-IP (0ms, zero DNS leak).
-	-- servers[2] is local direct DNS strictly scoped to VPS host + geosite:private + geosite:cn with skipFallback=true.
+	-- servers[2] is local direct DNS strictly scoped to VPS host + geosite:private + geosite:cn + custom direct domains with skipFallback=true.
 	local dns_servers = { "fakedns" }
 	local direct_domains = {}
+	local custom_direct_domains = {}
+
 	if node and node.address and not is_ip(node.address) then
 		table.insert(direct_domains, "full:" .. node.address:lower())
 	end
@@ -272,6 +274,22 @@ local function generate()
 		table.insert(direct_domains, "geosite:private")
 		table.insert(direct_domains, "geosite:cn")
 	end
+
+	local custom_raw = uci:get(CONFIG, "global", "direct_domains") or ""
+	for line in custom_raw:gmatch("[^\r\n]+") do
+		local clean_line = line:gsub("^%s+", ""):gsub("%s+$", "")
+		if clean_line ~= "" and not clean_line:find("^#") then
+			for item in clean_line:gmatch("[^%s,]+") do
+				local d = item:lower()
+				if not (d:find("^full:") or d:find("^domain:") or d:find("^regexp:") or d:find("^geosite:") or d:find("^keyword:")) then
+					d = "domain:" .. d
+				end
+				table.insert(direct_domains, d)
+				table.insert(custom_direct_domains, d)
+			end
+		end
+	end
+
 	if #direct_domains > 0 then
 		table.insert(dns_servers, {
 			address = local_dns,
@@ -294,6 +312,13 @@ local function generate()
 			outboundTag = "direct"
 		}
 	}
+	if #custom_direct_domains > 0 then
+		table.insert(routing_rules, {
+			type = "field",
+			domain = custom_direct_domains,
+			outboundTag = "direct"
+		})
+	end
 	if geo_ok then
 		table.insert(routing_rules, {
 			type = "field",
