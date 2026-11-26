@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-owall
-PKG_VERSION:=1.2.1
+PKG_VERSION:=1.3.0
 PKG_RELEASE:=1
 PKG_PO_VERSION:=$(PKG_VERSION)
 
@@ -9,7 +9,7 @@ PKG_LICENSE:=GPL-3.0-only
 PKG_MAINTAINER:=Owall Developers
 
 LUCI_TITLE:=LuCI support for Owall Ultra-Lightweight Xray Transparent Proxy
-LUCI_DEPENDS:=+curl +ip-full +resolveip \
+LUCI_DEPENDS:=+curl +ip-full +resolveip +unzip \
 	+libuci-lua +lua +luci-compat +luci-lib-jsonc \
 	+xray-core \
 	+v2ray-geoip +v2ray-geosite \

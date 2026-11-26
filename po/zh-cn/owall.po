@@ -81,3 +81,78 @@ msgstr "自定义直连域名（可选）"
 
 msgid "Optional fallback for unlisted intranet/domestic domains (one per line). Uses local DNS and direct routing."
 msgstr "可留空。仅当遇到未收录的企业内网或生僻国内域名时填写（一行一个，如 oa.company.cn），强制走本地 DNS 并直连。"
+
+msgid "Online Component Upgrade"
+msgstr "在线组件升级"
+
+msgid "Architecture"
+msgstr "设备架构"
+
+msgid "Package Format"
+msgstr "包格式"
+
+msgid "Check Updates"
+msgstr "检查更新"
+
+msgid "Upgrade All"
+msgstr "一键升级全部"
+
+msgid "Component"
+msgstr "组件"
+
+msgid "Current Version"
+msgstr "当前版本"
+
+msgid "Latest Version"
+msgstr "最新版本"
+
+msgid "Action"
+msgstr "操作"
+
+msgid "Owall Plugin"
+msgstr "Owall 插件"
+
+msgid "Xray-core Engine"
+msgstr "Xray-core 核心"
+
+msgid "GeoIP Rules"
+msgstr "GeoIP 规则库"
+
+msgid "GeoSite Rules"
+msgstr "GeoSite 规则库"
+
+msgid "Upgrade"
+msgstr "升级"
+
+msgid "Upgrading..."
+msgstr "正在升级..."
+
+msgid "Up to date"
+msgstr "已是最新"
+
+msgid "Update available"
+msgstr "有新版本"
+
+msgid "Click Check Updates"
+msgstr "点击“检查更新”获取"
+
+msgid "Not installed"
+msgstr "未安装"
+
+msgid "Unknown"
+msgstr "未知"
+
+msgid "Fetch failed"
+msgstr "检查失败"
+
+msgid "Upgrade completed!"
+msgstr "升级完成！"
+
+msgid "Upgrade failed, check log below."
+msgstr "升级失败，请查看下方日志。"
+
+msgid "Another upgrade task is already running."
+msgstr "已有升级任务正在后台执行中，请稍候。"
+
+msgid "Note: Owall uses built-in plain-text China IP lists for nftables bypass, so geoview is not required (saves ~5MB flash)."
+msgstr "说明：Owall 已内置纯文本国内 IP 列表驱动 nftables 分流，无需安装 geoview（可节省约 5MB 闪存空间）。"

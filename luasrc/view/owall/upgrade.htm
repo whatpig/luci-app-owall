@@ -1,0 +1,270 @@
+<style>
+.owall-upg-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+.owall-upg-meta {
+	font-size: 12px;
+	color: #6c757d;
+	margin-top: 2px;
+}
+.owall-upg-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+.owall-upg-table th,
+.owall-upg-table td {
+	padding: 9px 10px;
+	border-bottom: 1px solid #e9ecef;
+	text-align: left;
+	vertical-align: middle;
+}
+.owall-upg-table th {
+	color: #495057;
+	font-weight: 600;
+	background: #f8f9fa;
+}
+.owall-ver-badge {
+	display: inline-block;
+	padding: 2px 7px;
+	border-radius: 4px;
+	font-size: 12px;
+	font-family: monospace;
+	background: #edf2f7;
+	color: #2d3748;
+}
+.owall-ver-new {
+	background: #d4edda;
+	color: #155724;
+	font-weight: 600;
+}
+.owall-ver-ok {
+	background: #e2f5ea;
+	color: #1e7e34;
+}
+.owall-upg-note {
+	margin-top: 10px;
+	font-size: 12px;
+	color: #6c757d;
+}
+.owall-upg-log {
+	margin-top: 12px;
+	padding: 10px 12px;
+	background: #1e242b;
+	color: #e6edf3;
+	border-radius: 6px;
+	font-family: monospace;
+	font-size: 12px;
+	line-height: 1.45;
+	max-height: 220px;
+	overflow-y: auto;
+	white-space: pre-wrap;
+	word-break: break-all;
+	display: none;
+}
+</style>
+
+<div class="owall-card" id="owall-upgrade-card">
+	<div class="owall-upg-head">
+		<div>
+			<h3 style="margin: 0;">📦 <%:Online Component Upgrade%></h3>
+			<div class="owall-upg-meta" id="owall-upg-env"><%:Architecture%>: -</div>
+		</div>
+		<div class="owall-actions" style="margin-top: 0;">
+			<button class="cbi-button cbi-button-neutral" type="button" id="owall-btn-check" onclick="owallCheckUpdates()">🔍 <%:Check Updates%></button>
+			<button class="cbi-button cbi-button-apply" type="button" id="owall-btn-all" onclick="owallUpgrade('all')">⬆️ <%:Upgrade All%></button>
+		</div>
+	</div>
+
+	<table class="owall-upg-table">
+		<thead>
+			<tr>
+				<th><%:Component%></th>
+				<th><%:Current Version%></th>
+				<th><%:Latest Version%></th>
+				<th style="width: 110px;"><%:Action%></th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr>
+				<td><strong><%:Owall Plugin%></strong><div class="owall-upg-meta">luci-app-owall</div></td>
+				<td><span class="owall-ver-badge" id="ver-local-owall">-</span></td>
+				<td id="ver-remote-owall">-</td>
+				<td><button class="cbi-button cbi-button-action owall-upg-btn" type="button" onclick="owallUpgrade('owall')"><%:Upgrade%></button></td>
+			</tr>
+			<tr>
+				<td><strong><%:Xray-core Engine%></strong><div class="owall-upg-meta">xray</div></td>
+				<td><span class="owall-ver-badge" id="ver-local-xray">-</span></td>
+				<td id="ver-remote-xray">-</td>
+				<td><button class="cbi-button cbi-button-action owall-upg-btn" type="button" onclick="owallUpgrade('xray')"><%:Upgrade%></button></td>
+			</tr>
+			<tr>
+				<td><strong><%:GeoIP Rules%></strong><div class="owall-upg-meta">geoip.dat + china_ip.txt</div></td>
+				<td><span class="owall-ver-badge" id="ver-local-geoip">-</span></td>
+				<td id="ver-remote-geoip">-</td>
+				<td><button class="cbi-button cbi-button-action owall-upg-btn" type="button" onclick="owallUpgrade('geoip')"><%:Upgrade%></button></td>
+			</tr>
+			<tr>
+				<td><strong><%:GeoSite Rules%></strong><div class="owall-upg-meta">geosite.dat</div></td>
+				<td><span class="owall-ver-badge" id="ver-local-geosite">-</span></td>
+				<td id="ver-remote-geosite">-</td>
+				<td><button class="cbi-button cbi-button-action owall-upg-btn" type="button" onclick="owallUpgrade('geosite')"><%:Upgrade%></button></td>
+			</tr>
+		</tbody>
+	</table>
+
+	<div class="owall-upg-note">💡 <%:Note: Owall uses built-in plain-text China IP lists for nftables bypass, so geoview is not required (saves ~5MB flash).%></div>
+	<pre class="owall-upg-log" id="owall-upg-log"></pre>
+</div>
+
+<script type="text/javascript">//<![CDATA[
+var OWALL_UPG_I18N = {
+	arch: '<%:Architecture%>',
+	pkgMgr: '<%:Package Format%>',
+	checking: '<%:Checking...%>',
+	upgrading: '<%:Upgrading...%>',
+	upToDate: '<%:Up to date%>',
+	newAvail: '<%:Update available%>',
+	notChecked: '<%:Click Check Updates%>',
+	notInstalled: '<%:Not installed%>',
+	unknown: '<%:Unknown%>',
+	fetchFail: '<%:Fetch failed%>',
+	done: '<%:Upgrade completed!%>',
+	failed: '<%:Upgrade failed, check log below.%>',
+	busy: '<%:Another upgrade task is already running.%>',
+	upgradeLabel: '<%:Upgrade%>',
+	checkLabel: '<%:Check Updates%>',
+	upgradeAllLabel: '<%:Upgrade All%>'
+};
+
+var owallUpgTimer = null;
+
+function setUpgButtonsDisabled(disabled) {
+	var btns = document.querySelectorAll('.owall-upg-btn');
+	for (var i = 0; i < btns.length; i++) {
+		btns[i].disabled = disabled;
+	}
+	var allBtn = document.getElementById('owall-btn-all');
+	var chkBtn = document.getElementById('owall-btn-check');
+	if (allBtn) allBtn.disabled = disabled;
+	if (chkBtn) chkBtn.disabled = disabled;
+}
+
+function fmtLocalVer(v) {
+	if (!v || v === 'unknown') return OWALL_UPG_I18N.unknown;
+	if (v === 'not_installed') return OWALL_UPG_I18N.notInstalled;
+	return v;
+}
+
+function renderUpgradeInfo(data) {
+	if (!data) return;
+	var envEl = document.getElementById('owall-upg-env');
+	if (envEl && data.arch) {
+		envEl.textContent = OWALL_UPG_I18N.arch + ': ' + data.arch + '  |  ' + OWALL_UPG_I18N.pkgMgr + ': ' + (data.pkg_mgr || '-');
+	}
+	var keys = ['owall', 'xray', 'geoip', 'geosite'];
+	for (var i = 0; i < keys.length; i++) {
+		var k = keys[i];
+		var item = data[k] || {};
+		var lEl = document.getElementById('ver-local-' + k);
+		var rEl = document.getElementById('ver-remote-' + k);
+		if (lEl) lEl.textContent = fmtLocalVer(item['local']);
+		if (rEl) {
+			if (!data.checked) {
+				rEl.innerHTML = '<span style="color:#6c757d;">' + OWALL_UPG_I18N.notChecked + '</span>';
+			} else if (!item.remote) {
+				rEl.innerHTML = '<span style="color:#dc3545;">' + OWALL_UPG_I18N.fetchFail + '</span>';
+			} else if (item.has_update) {
+				rEl.innerHTML = '<span class="owall-ver-badge owall-ver-new">' + item.remote + ' (' + OWALL_UPG_I18N.newAvail + ')</span>';
+			} else {
+				rEl.innerHTML = '<span class="owall-ver-badge owall-ver-ok">✓ ' + item.remote + ' (' + OWALL_UPG_I18N.upToDate + ')</span>';
+			}
+		}
+	}
+}
+
+function loadUpgradeInfo() {
+	XHR.get('<%=luci.dispatcher.build_url("admin", "services", "owall", "upgrade_info")%>', null, function(x, data) {
+		renderUpgradeInfo(data);
+	});
+}
+
+function owallCheckUpdates() {
+	var chkBtn = document.getElementById('owall-btn-check');
+	if (chkBtn) {
+		chkBtn.disabled = true;
+		chkBtn.textContent = '🔍 ' + OWALL_UPG_I18N.checking;
+	}
+	XHR.get('<%=luci.dispatcher.build_url("admin", "services", "owall", "upgrade_check")%>', null, function(x, data) {
+		if (chkBtn) {
+			chkBtn.disabled = false;
+			chkBtn.textContent = '🔍 ' + OWALL_UPG_I18N.checkLabel;
+		}
+		renderUpgradeInfo(data);
+	});
+}
+
+function pollUpgradeLog() {
+	XHR.get('<%=luci.dispatcher.build_url("admin", "services", "owall", "upgrade_log")%>', null, function(x, st) {
+		if (!st) return;
+		var logEl = document.getElementById('owall-upg-log');
+		if (logEl && st.log) {
+			logEl.style.display = 'block';
+			logEl.textContent = st.log;
+			logEl.scrollTop = logEl.scrollHeight;
+		}
+		if (st.running) {
+			setUpgButtonsDisabled(true);
+		} else {
+			if (owallUpgTimer) {
+				clearInterval(owallUpgTimer);
+				owallUpgTimer = null;
+			}
+			setUpgButtonsDisabled(false);
+			loadUpgradeInfo();
+			if (typeof updateOwallStatus === 'function') {
+				setTimeout(updateOwallStatus, 1000);
+			}
+			if (st.result === 'ok' && (st.target === 'owall' || st.target === 'all')) {
+				setTimeout(function() { location.reload(); }, 2000);
+			}
+		}
+	});
+}
+
+function owallUpgrade(target) {
+	setUpgButtonsDisabled(true);
+	var logEl = document.getElementById('owall-upg-log');
+	if (logEl) {
+		logEl.style.display = 'block';
+		logEl.textContent = OWALL_UPG_I18N.upgrading;
+	}
+	XHR.get('<%=luci.dispatcher.build_url("admin", "services", "owall", "upgrade_run")%>', { target: target }, function(x, res) {
+		if (res && res.error === 'busy') {
+			if (logEl) logEl.textContent = OWALL_UPG_I18N.busy;
+		}
+		if (!owallUpgTimer) {
+			owallUpgTimer = setInterval(pollUpgradeLog, 1500);
+		}
+		pollUpgradeLog();
+	});
+}
+
+loadUpgradeInfo();
+XHR.get('<%=luci.dispatcher.build_url("admin", "services", "owall", "upgrade_log")%>', null, function(x, st) {
+	if (st && st.running) {
+		setUpgButtonsDisabled(true);
+		var logEl = document.getElementById('owall-upg-log');
+		if (logEl && st.log) {
+			logEl.style.display = 'block';
+			logEl.textContent = st.log;
+		}
+		owallUpgTimer = setInterval(pollUpgradeLog, 1500);
+	}
+});
+//]]></script>

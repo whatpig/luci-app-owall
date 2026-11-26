@@ -42,6 +42,11 @@ o_direct.rows = 2
 o_direct.wrap = "off"
 o_direct.rmempty = true
 
+-- Online Component Upgrade Card Template
+local s_upgrade = m:section(NamedSection, "global", "global")
+s_upgrade.anonymous = true
+s_upgrade.template = "owall/upgrade"
+
 -- Commit hook: use a FRESH UCI cursor; app.sh prepare handles smart MD5-cached parsing
 function m.on_after_commit(self)
 	local cur = uci_mod.cursor()

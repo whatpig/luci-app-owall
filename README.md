@@ -14,6 +14,7 @@
 - 🚀 **海外访问 0ms 秒开**：全自动 FakeDNS（`198.18.0.0/16`）零污染、零泄露，域名在远端 VPS 服务器端高效解析。
 - 📦 **超低内存占用**：Dnsmasq 纯转发（零规则注入），全面收敛至单一 **Xray-core** 内核，原生支持 Reality / Vision / XHTTP / WS / gRPC 等前沿传输。
 - 🔄 **全协议与全自动故障切换**：原生支持 `VLESS (Reality / Vision / XHTTP)`、`Trojan`、`VMess`、`Shadowsocks`、`Hysteria 2`，后台智能优选最低延迟节点。
+- 📦 **内置在线组件升级**：LuCI 页面一键检测并升级 **Owall 插件（`.ipk` / `.apk`）**、**Xray-core 内核**、**GeoIP（同步刷新国内 IP 列表）** 与 **GeoSite 规则库**（无需安装占用 5MB 空间的 `geoview`）。
 
 ---
 

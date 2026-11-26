@@ -25,20 +25,23 @@ get_owall_pids() {
 }
 
 ensure_china_ip() {
-	if [ -f "/usr/share/v2ray/china.txt" ]; then
-		return 0
-	fi
-	if command -v geoview >/dev/null 2>&1 && { [ -f "/usr/share/v2ray/geoip.dat" ] || [ -f "/usr/share/xray/geoip.dat" ]; }; then
-		return 0
-	fi
-
-	if [ -f "$CHINA_IP_FILE" ]; then
-		local cnt=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$CHINA_IP_FILE" 2>/dev/null || true)
-		cnt=${cnt:-0}
-		local now=$(date +%s)
-		local mtime=$(date -r "$CHINA_IP_FILE" +%s 2>/dev/null)
-		if [ "$cnt" -ge 500 ] && [ -n "$mtime" ] && [ $((now - mtime)) -lt 604800 ]; then
+	local force="$1"
+	if [ "$force" != "force" ]; then
+		if [ -f "/usr/share/v2ray/china.txt" ]; then
 			return 0
+		fi
+		if command -v geoview >/dev/null 2>&1 && { [ -f "/usr/share/v2ray/geoip.dat" ] || [ -f "/usr/share/xray/geoip.dat" ]; }; then
+			return 0
+		fi
+
+		if [ -f "$CHINA_IP_FILE" ]; then
+			local cnt=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' "$CHINA_IP_FILE" 2>/dev/null || true)
+			cnt=${cnt:-0}
+			local now=$(date +%s)
+			local mtime=$(date -r "$CHINA_IP_FILE" +%s 2>/dev/null)
+			if [ "$cnt" -ge 500 ] && [ -n "$mtime" ] && [ $((now - mtime)) -lt 604800 ]; then
+				return 0
+			fi
 		fi
 	fi
 
@@ -166,10 +169,11 @@ reload() {
 case "$1" in
 	prepare) prepare "$2" ;;
 	sync) sync_nodes "force" ;;
+	update_china_ip) ensure_china_ip "force" ;;
 	run) run ;;
 	start_firewall) start_firewall ;;
 	stop_firewall) stop_firewall ;;
 	kill_all) kill_all ;;
 	reload) reload ;;
-	*) echo "Usage: $0 {prepare|sync|run|start_firewall|stop_firewall|kill_all|reload}" ;;
+	*) echo "Usage: $0 {prepare|sync|update_china_ip|run|start_firewall|stop_firewall|kill_all|reload}" ;;
 esac

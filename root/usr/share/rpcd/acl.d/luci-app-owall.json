@@ -5,7 +5,10 @@
 			"uci": [ "owall" ],
 			"file": {
 				"/var/log/owall.log": [ "read" ],
-				"/tmp/owall_status.json": [ "read" ]
+				"/tmp/owall_status.json": [ "read" ],
+				"/tmp/owall_upgrade.log": [ "read" ],
+				"/tmp/owall_upgrade_state.json": [ "read" ],
+				"/tmp/owall_upgrade_versions.json": [ "read" ]
 			}
 		},
 		"write": {
